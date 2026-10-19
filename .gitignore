@@ -1,0 +1,33 @@
+# Built binaries and outputs
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+bin/
+build/
+*/build/
+app/build/
+
+# Gradle files
+.gradle/
+.kotlin/
+buildOutput/
+
+# Local configuration
+local.properties
+.attach_pid*
+
+# IDE settings
+*.iml
+.idea/
+.vscode/
+
+# OS and temp files
+.DS_Store
+Thumbs.db
+captures/
+.externalNativeBuild
+.cxx
+*.log
+test_sc.png
