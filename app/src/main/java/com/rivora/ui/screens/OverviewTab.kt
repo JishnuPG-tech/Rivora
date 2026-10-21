@@ -21,6 +21,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,6 +84,7 @@ fun OverviewTab(
   isWifiConnected: Boolean = false,
   isCellularConnected: Boolean = true
 ) {
+  var showCancelConfirm by remember { mutableStateOf(false) }
   val isCompleted = (totalBytes > 0 && downloadedBytes >= totalBytes) || (completedChunks >= totalChunks && totalChunks > 0)
   val progress = if (isCompleted) 1f else if (totalBytes > 0) (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f) else 0f
   val progressPercent = if (isCompleted) 100 else (progress * 100).toInt()
@@ -161,12 +165,12 @@ fun OverviewTab(
           cellularActive = cellularActive,
           isPaused = isPaused,
           secondaryLabel = if (cellularInterface.contains("usb", ignoreCase = true)) "USB" else "CELL",
-          modifier = Modifier.weight(1.02f)
+          modifier = Modifier.weight(1.05f)
         )
 
         Column(
           modifier = Modifier
-            .weight(0.98f)
+            .weight(0.95f)
             .padding(end = 4.dp),
           horizontalAlignment = Alignment.End
         ) {
@@ -177,6 +181,19 @@ fun OverviewTab(
             )
           )
 
+          val heroFontSize = when {
+            currentSpeedText.length >= 6 -> 24.sp
+            currentSpeedText.length >= 5 -> 28.sp
+            currentSpeedText.length >= 4 -> 30.sp
+            else -> 34.sp
+          }
+          val heroLineHeight = when {
+            currentSpeedText.length >= 6 -> 26.sp
+            currentSpeedText.length >= 5 -> 30.sp
+            currentSpeedText.length >= 4 -> 32.sp
+            else -> 36.sp
+          }
+
           Row(
             verticalAlignment = Alignment.Bottom,
             modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
@@ -184,8 +201,8 @@ fun OverviewTab(
             Text(
               text = currentSpeedText,
               style = RivoraType.HeroSpeed.copy(
-                fontSize = 36.sp,
-                lineHeight = 38.sp,
+                fontSize = heroFontSize,
+                lineHeight = heroLineHeight,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White
               ),
@@ -196,12 +213,12 @@ fun OverviewTab(
             Text(
               text = unitText,
               style = RivoraType.HeroUnit.copy(
-                fontSize = 14.sp,
+                fontSize = 13.sp,
                 color = Color(0xFFC8C8CE)
               ),
               softWrap = false,
               maxLines = 1,
-              modifier = Modifier.padding(bottom = 5.dp)
+              modifier = Modifier.padding(bottom = 4.dp)
             )
           }
 
@@ -267,7 +284,7 @@ fun OverviewTab(
                 color = Color(0xFFC8C8CE)
               )
               Text(
-                text = "Downloads/",
+                text = "Downloads/Rivora/",
                 style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 16f).copy(
                   color = Color(0xFFC8C8CE)
                 ),
@@ -389,7 +406,7 @@ fun OverviewTab(
         )
         RivoraButton(
           text = "Cancel",
-          onClick = onCancel,
+          onClick = { showCancelConfirm = true },
           variant = RivoraButtonVariant.DANGER,
           height = 42.dp,
           modifier = Modifier.weight(1f)
@@ -457,13 +474,17 @@ fun OverviewTab(
                 text = wifiSpeedText,
                 style = RivoraType.rivoraText(RivoraType.Mono, 13f, FontWeight.Bold, 0f, 16f).copy(
                   color = RivoraColor.Orange
-                )
+                ),
+                maxLines = 1,
+                softWrap = false
               )
               Text(
                 text = "· $wifiSharePercent%",
                 style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.SemiBold, 0f, 15f).copy(
                   color = RivoraColor.TextSecondary
-                )
+                ),
+                maxLines = 1,
+                softWrap = false
               )
             }
           }
@@ -538,13 +559,17 @@ fun OverviewTab(
                 text = if (cellularActive) cellularSpeedText else "0.0 $unitText",
                 style = RivoraType.rivoraText(RivoraType.Mono, 13f, FontWeight.Bold, 0f, 16f).copy(
                   color = if (cellularActive) RivoraColor.TextPrimary else RivoraColor.TextMuted
-                )
+                ),
+                maxLines = 1,
+                softWrap = false
               )
               Text(
                 text = if (cellularActive) "· $cellSharePercent%" else "· (disabled)",
                 style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.SemiBold, 0f, 15f).copy(
                   color = RivoraColor.TextSecondary
-                )
+                ),
+                maxLines = 1,
+                softWrap = false
               )
             }
           }
@@ -580,6 +605,19 @@ fun OverviewTab(
         )
       }
     }
+  }
+
+  if (showCancelConfirm) {
+    CancelDownloadConfirmDialog(
+      fileName = fileName,
+      onConfirmCancel = {
+        showCancelConfirm = false
+        onCancel()
+      },
+      onDismiss = {
+        showCancelConfirm = false
+      }
+    )
   }
 }
 

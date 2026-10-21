@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -210,7 +211,8 @@ class DownloadNotificationService : Service() {
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.rivora_logo)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.rivora_logo))
             .setContentTitle(title)
             .setContentText(content)
             .setContentIntent(appPendingIntent)
@@ -248,7 +250,8 @@ class DownloadNotificationService : Service() {
         )
 
         val completeNotification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.rivora_logo)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.rivora_logo))
             .setContentTitle("Download Complete")
             .setContentText(fileName)
             .setContentIntent(appPendingIntent)

@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.custom
+package com.rivora.ui.custom
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -27,7 +27,7 @@ import com.rivora.theme.RivoraType
 
 /**
  * Adaptive Speed Merger Canvas supporting Single-Stream (Cellular-only or Wi-Fi-only)
- * and Dual-Stream Convergence based on actual real-time Android device connectivity.
+ * and Dual-Stream Convergence with left-aligned labels to prevent clipping.
  */
 @Composable
 fun SpeedMergerCanvas(
@@ -65,9 +65,7 @@ fun SpeedMergerCanvas(
     val w = size.width
     val h = size.height
 
-    // Geometric Anchors
-    val nodeX = (w * 0.44f).coerceIn(58.dp.toPx(), 74.dp.toPx())
-    val convX = (w * 0.75f).coerceIn(nodeX + 36.dp.toPx(), w - 32.dp.toPx())
+    val leftMargin = 4.dp.toPx()
     val convY = h * 0.52f
 
     if (isDual) {
@@ -77,25 +75,43 @@ fun SpeedMergerCanvas(
       val wifiY = h * 0.32f
       val cellY = h * 0.72f
 
-      // 1. Wi-Fi
       val wifiLabelLayout = textMeasurer.measure(
         text = "WI-FI",
         style = RivoraType.rivoraText(RivoraType.Mono, 9.5f, FontWeight.Medium, 0.6f, 13f).copy(color = RivoraColor.TextSecondary)
       )
-      drawText(
-        textLayoutResult = wifiLabelLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - wifiLabelLayout.size.width, wifiY - 18.dp.toPx())
-      )
-
       val wifiSpeedLayout = textMeasurer.measure(
         text = wifiSpeedText,
         style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Bold, 0f, 16f).copy(color = RivoraColor.Orange)
       )
-      drawText(
-        textLayoutResult = wifiSpeedLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - wifiSpeedLayout.size.width, wifiY - 3.dp.toPx())
+
+      val cellLabelLayout = textMeasurer.measure(
+        text = secondaryLabel,
+        style = RivoraType.rivoraText(RivoraType.Mono, 9.5f, FontWeight.Medium, 0.5f, 13f).copy(color = RivoraColor.TextSecondary)
+      )
+      val cellSpeedLayout = textMeasurer.measure(
+        text = cellularSpeedText,
+        style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Medium, 0f, 16f).copy(color = RivoraColor.StreamSecondary)
       )
 
+      val maxTextW = maxOf(
+        wifiLabelLayout.size.width,
+        wifiSpeedLayout.size.width,
+        cellLabelLayout.size.width,
+        cellSpeedLayout.size.width
+      ).toFloat()
+
+      val nodeX = (leftMargin + maxTextW + 10.dp.toPx()).coerceAtMost(w - 50.dp.toPx())
+      val convX = (w - 18.dp.toPx()).coerceAtLeast(nodeX + 30.dp.toPx())
+
+      // 1. Wi-Fi text & node
+      drawText(
+        textLayoutResult = wifiLabelLayout,
+        topLeft = Offset(leftMargin, wifiY - 18.dp.toPx())
+      )
+      drawText(
+        textLayoutResult = wifiSpeedLayout,
+        topLeft = Offset(leftMargin, wifiY - 3.dp.toPx())
+      )
       drawCircle(
         color = RivoraColor.Orange.copy(alpha = 0.28f),
         radius = 7.dp.toPx(),
@@ -125,25 +141,15 @@ fun SpeedMergerCanvas(
         )
       )
 
-      // 2. Cellular
-      val cellLabelLayout = textMeasurer.measure(
-        text = secondaryLabel,
-        style = RivoraType.rivoraText(RivoraType.Mono, 9.5f, FontWeight.Medium, 0.5f, 13f).copy(color = RivoraColor.TextSecondary)
-      )
+      // 2. Cellular text & node
       drawText(
         textLayoutResult = cellLabelLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - cellLabelLayout.size.width, cellY - 18.dp.toPx())
-      )
-
-      val cellSpeedLayout = textMeasurer.measure(
-        text = cellularSpeedText,
-        style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Medium, 0f, 16f).copy(color = RivoraColor.StreamSecondary)
+        topLeft = Offset(leftMargin, cellY - 18.dp.toPx())
       )
       drawText(
         textLayoutResult = cellSpeedLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - cellSpeedLayout.size.width, cellY - 3.dp.toPx())
+        topLeft = Offset(leftMargin, cellY - 3.dp.toPx())
       )
-
       drawCircle(
         color = RivoraColor.StreamSecondary.copy(alpha = 0.28f),
         radius = 7.dp.toPx(),
@@ -173,6 +179,8 @@ fun SpeedMergerCanvas(
         )
       )
 
+      drawConvergenceAndArrow(convX, convY, w)
+
     } else if (isCellActive) {
       // -------------------------------------------------------------
       // CELLULAR-ONLY: Single centered horizontal stream straight to arrow
@@ -181,20 +189,23 @@ fun SpeedMergerCanvas(
         text = secondaryLabel,
         style = RivoraType.rivoraText(RivoraType.Mono, 9.5f, FontWeight.Medium, 0.5f, 13f).copy(color = RivoraColor.TextSecondary)
       )
-      drawText(
-        textLayoutResult = cellLabelLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - cellLabelLayout.size.width, convY - 18.dp.toPx())
-      )
-
       val cellSpeedLayout = textMeasurer.measure(
         text = cellularSpeedText,
-        style = RivoraType.rivoraText(RivoraType.Mono, 13f, FontWeight.Bold, 0f, 16f).copy(color = RivoraColor.StreamSecondary)
+        style = RivoraType.rivoraText(RivoraType.Mono, 12.5f, FontWeight.Bold, 0f, 16f).copy(color = RivoraColor.StreamSecondary)
+      )
+
+      val maxTextW = maxOf(cellLabelLayout.size.width, cellSpeedLayout.size.width).toFloat()
+      val nodeX = (leftMargin + maxTextW + 10.dp.toPx()).coerceAtMost(w - 50.dp.toPx())
+      val convX = (w - 18.dp.toPx()).coerceAtLeast(nodeX + 30.dp.toPx())
+
+      drawText(
+        textLayoutResult = cellLabelLayout,
+        topLeft = Offset(leftMargin, convY - 18.dp.toPx())
       )
       drawText(
         textLayoutResult = cellSpeedLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - cellSpeedLayout.size.width, convY - 3.dp.toPx())
+        topLeft = Offset(leftMargin, convY - 3.dp.toPx())
       )
-
       drawCircle(
         color = RivoraColor.StreamSecondary.copy(alpha = 0.28f),
         radius = 7.dp.toPx(),
@@ -206,7 +217,6 @@ fun SpeedMergerCanvas(
         center = Offset(nodeX, convY)
       )
 
-      // Straight flow path to convergence
       drawLine(
         color = RivoraColor.StreamSecondary,
         start = Offset(nodeX + 4.dp.toPx(), convY),
@@ -216,6 +226,8 @@ fun SpeedMergerCanvas(
         pathEffect = if (!isPaused) PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 8.dp.toPx()), phase * density) else null
       )
 
+      drawConvergenceAndArrow(convX, convY, w)
+
     } else if (isWifiConnected) {
       // -------------------------------------------------------------
       // WI-FI-ONLY: Single centered horizontal stream straight to arrow
@@ -224,20 +236,23 @@ fun SpeedMergerCanvas(
         text = "WI-FI",
         style = RivoraType.rivoraText(RivoraType.Mono, 9.5f, FontWeight.Medium, 0.6f, 13f).copy(color = RivoraColor.TextSecondary)
       )
-      drawText(
-        textLayoutResult = wifiLabelLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - wifiLabelLayout.size.width, convY - 18.dp.toPx())
-      )
-
       val wifiSpeedLayout = textMeasurer.measure(
         text = wifiSpeedText,
-        style = RivoraType.rivoraText(RivoraType.Mono, 13f, FontWeight.Bold, 0f, 16f).copy(color = RivoraColor.Orange)
+        style = RivoraType.rivoraText(RivoraType.Mono, 12.5f, FontWeight.Bold, 0f, 16f).copy(color = RivoraColor.Orange)
+      )
+
+      val maxTextW = maxOf(wifiLabelLayout.size.width, wifiSpeedLayout.size.width).toFloat()
+      val nodeX = (leftMargin + maxTextW + 10.dp.toPx()).coerceAtMost(w - 50.dp.toPx())
+      val convX = (w - 18.dp.toPx()).coerceAtLeast(nodeX + 30.dp.toPx())
+
+      drawText(
+        textLayoutResult = wifiLabelLayout,
+        topLeft = Offset(leftMargin, convY - 18.dp.toPx())
       )
       drawText(
         textLayoutResult = wifiSpeedLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - wifiSpeedLayout.size.width, convY - 3.dp.toPx())
+        topLeft = Offset(leftMargin, convY - 3.dp.toPx())
       )
-
       drawCircle(
         color = RivoraColor.Orange.copy(alpha = 0.28f),
         radius = 7.dp.toPx(),
@@ -249,7 +264,6 @@ fun SpeedMergerCanvas(
         center = Offset(nodeX, convY)
       )
 
-      // Straight flow path to convergence
       drawLine(
         color = RivoraColor.Orange,
         start = Offset(nodeX + 4.dp.toPx(), convY),
@@ -258,6 +272,9 @@ fun SpeedMergerCanvas(
         cap = StrokeCap.Round,
         pathEffect = if (!isPaused) PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 8.dp.toPx()), phase * density) else null
       )
+
+      drawConvergenceAndArrow(convX, convY, w)
+
     } else {
       // Offline State
       val offlineLayout = textMeasurer.measure(
@@ -266,48 +283,58 @@ fun SpeedMergerCanvas(
       )
       drawText(
         textLayoutResult = offlineLayout,
-        topLeft = Offset(nodeX - 8.dp.toPx() - offlineLayout.size.width, convY - 8.dp.toPx())
+        topLeft = Offset(leftMargin, convY - 8.dp.toPx())
       )
+      val nodeX = leftMargin + offlineLayout.size.width + 10.dp.toPx()
       drawCircle(
         color = RivoraColor.TextMuted,
         radius = 4.dp.toPx(),
         center = Offset(nodeX, convY)
       )
     }
-
-    // 3. Convergence Node Ring (Outer translucent ring + solid center dot)
-    drawCircle(
-      color = Color(0x40EDEDEF),
-      radius = 7.dp.toPx(),
-      center = Offset(convX, convY),
-      style = Stroke(width = 1.5.dp.toPx())
-    )
-    drawCircle(
-      color = Color(0xFFEDEDEF),
-      radius = 3.2.dp.toPx(),
-      center = Offset(convX, convY)
-    )
-
-    // 4. White Flow Arrow pointing to Total Speed
-    val arrowEndX = (w - 2.dp.toPx()).coerceAtLeast(convX + 18.dp.toPx())
-    drawLine(
-      color = Color(0xFFEDEDEF),
-      start = Offset(convX + 7.dp.toPx(), convY),
-      end = Offset(arrowEndX - 7.dp.toPx(), convY),
-      strokeWidth = 3.5.dp.toPx(),
-      cap = StrokeCap.Round
-    )
-
-    // Filled Arrowhead
-    val arrowHead = Path().apply {
-      moveTo(arrowEndX, convY)
-      lineTo(arrowEndX - 7.dp.toPx(), convY - 4.5.dp.toPx())
-      lineTo(arrowEndX - 7.dp.toPx(), convY + 4.5.dp.toPx())
-      close()
-    }
-    drawPath(
-      path = arrowHead,
-      color = Color(0xFFEDEDEF)
-    )
   }
+}
+
+/**
+ * Helper to draw the convergence node ring and white flow arrow.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawConvergenceAndArrow(
+  convX: Float,
+  convY: Float,
+  w: Float
+) {
+  // Convergence Node Ring
+  drawCircle(
+    color = Color(0x40EDEDEF),
+    radius = 7.dp.toPx(),
+    center = Offset(convX, convY),
+    style = Stroke(width = 1.5.dp.toPx())
+  )
+  drawCircle(
+    color = Color(0xFFEDEDEF),
+    radius = 3.2.dp.toPx(),
+    center = Offset(convX, convY)
+  )
+
+  // White Flow Arrow pointing right toward Total Speed
+  val arrowEndX = (w - 2.dp.toPx()).coerceAtLeast(convX + 16.dp.toPx())
+  drawLine(
+    color = Color(0xFFEDEDEF),
+    start = Offset(convX + 7.dp.toPx(), convY),
+    end = Offset(arrowEndX - 7.dp.toPx(), convY),
+    strokeWidth = 3.2.dp.toPx(),
+    cap = StrokeCap.Round
+  )
+
+  // Filled Arrowhead
+  val arrowHead = Path().apply {
+    moveTo(arrowEndX, convY)
+    lineTo(arrowEndX - 7.dp.toPx(), convY - 4.5.dp.toPx())
+    lineTo(arrowEndX - 7.dp.toPx(), convY + 4.5.dp.toPx())
+    close()
+  }
+  drawPath(
+    path = arrowHead,
+    color = Color(0xFFEDEDEF)
+  )
 }

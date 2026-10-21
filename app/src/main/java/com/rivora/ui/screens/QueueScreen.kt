@@ -22,9 +22,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -75,6 +83,7 @@ fun QueueScreen(
   isWifiConnected: Boolean = false,
   isCellularConnected: Boolean = true
 ) {
+  var showCancelConfirm by remember { mutableStateOf(false) }
   val activeCount = if (activeItem != null && (activeItem.status == DownloadStatus.ACTIVE || activeItem.status == DownloadStatus.PAUSED)) 1 else 0
   val queueCount = queue.size
   val activeNetworks = (if (isWifiConnected) 1 else 0) + (if (cellularActive && isCellularConnected) 1 else 0)
@@ -87,7 +96,7 @@ fun QueueScreen(
     Column(
       modifier = Modifier.fillMaxSize()
     ) {
-      // 1. Top Bar: Rivora Logo & Brand with Network Status Pill as before
+      // 1. Top Bar: Rivora Logo & Brand with Network Status Pill
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -237,41 +246,59 @@ fun QueueScreen(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                  Text(
-                    text = "${(progress * 100).toInt()}%",
-                    style = RivoraType.rivoraText(RivoraType.Mono, 16f, FontWeight.Bold, 0f, 20f)
-                      .copy(color = if (isPaused) RivoraColor.Amber else RivoraColor.OrangeBright)
-                  )
-
-                  // Pause / Resume Quick Button
+                  // Sleek, balanced percentage badge
                   Box(
                     modifier = Modifier
-                      .clip(CircleShape)
-                      .background(RivoraColor.SurfaceRaised)
-                      .border(1.dp, RivoraColor.BorderDefault, CircleShape)
-                      .clickable { onTogglePause() }
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
+                      .clip(RoundedCornerShape(6.dp))
+                      .background(if (isPaused) RivoraColor.Amber.copy(alpha = 0.12f) else RivoraColor.Orange.copy(alpha = 0.12f))
+                      .border(
+                        width = 1.dp,
+                        color = if (isPaused) RivoraColor.Amber.copy(alpha = 0.35f) else RivoraColor.Orange.copy(alpha = 0.35f),
+                        shape = RoundedCornerShape(6.dp)
+                      )
+                      .padding(horizontal = 7.dp, vertical = 3.dp),
                     contentAlignment = Alignment.Center
                   ) {
                     Text(
-                      text = if (isPaused) "▶" else "❚❚",
-                      style = TextStyle(fontSize = 10.sp, color = RivoraColor.OrangeBright, fontWeight = FontWeight.Bold)
+                      text = "${(progress * 100).toInt()}%",
+                      style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.SemiBold, 0.2f, 15f)
+                        .copy(color = if (isPaused) RivoraColor.Amber else RivoraColor.OrangeBright)
                     )
                   }
 
-                  // Cancel Quick Button
+                  // Upgraded Circular Pause / Resume Quick Button
                   Box(
                     modifier = Modifier
+                      .size(30.dp)
                       .clip(CircleShape)
                       .background(RivoraColor.SurfaceRaised)
-                      .border(1.dp, RivoraColor.BorderDefault, CircleShape)
-                      .clickable { onCancelActive() }
-                      .padding(horizontal = 8.dp, vertical = 4.dp),
+                      .border(1.dp, RivoraColor.BorderSubtle, CircleShape)
+                      .clickable { onTogglePause() },
                     contentAlignment = Alignment.Center
                   ) {
-                    Text(
-                      text = "✕",
-                      style = TextStyle(fontSize = 11.sp, color = RivoraColor.TextSecondary, fontWeight = FontWeight.Bold)
+                    Icon(
+                      imageVector = if (isPaused) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                      contentDescription = if (isPaused) "Resume" else "Pause",
+                      tint = if (isPaused) RivoraColor.OrangeBright else RivoraColor.TextPrimary,
+                      modifier = Modifier.size(16.dp)
+                    )
+                  }
+
+                  // Upgraded Circular Cancel Quick Button
+                  Box(
+                    modifier = Modifier
+                      .size(30.dp)
+                      .clip(CircleShape)
+                      .background(RivoraColor.SurfaceRaised)
+                      .border(1.dp, RivoraColor.BorderSubtle, CircleShape)
+                      .clickable { showCancelConfirm = true },
+                    contentAlignment = Alignment.Center
+                  ) {
+                    Icon(
+                      imageVector = Icons.Rounded.Close,
+                      contentDescription = "Cancel",
+                      tint = RivoraColor.TextSecondary,
+                      modifier = Modifier.size(15.dp)
                     )
                   }
                 }
@@ -391,16 +418,18 @@ fun QueueScreen(
                 }
                 Box(
                   modifier = Modifier
+                    .size(28.dp)
                     .clip(CircleShape)
                     .background(RivoraColor.SurfaceRaised)
-                    .border(1.dp, RivoraColor.BorderDefault, CircleShape)
-                    .clickable { onRemoveQueued(item.id) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .border(1.dp, RivoraColor.BorderSubtle, CircleShape)
+                    .clickable { onRemoveQueued(item.id) },
                   contentAlignment = Alignment.Center
                 ) {
-                  Text(
-                    text = "✕",
-                    style = TextStyle(fontSize = 11.sp, color = RivoraColor.TextSecondary, fontWeight = FontWeight.Bold)
+                  Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Remove",
+                    tint = RivoraColor.TextSecondary,
+                    modifier = Modifier.size(14.dp)
                   )
                 }
               }
@@ -602,5 +631,19 @@ fun QueueScreen(
         modifier = Modifier.offset(y = (-2).dp)
       )
     }
+  }
+
+  if (showCancelConfirm) {
+    val activeFileName = activeItem?.fileName ?: "this file"
+    CancelDownloadConfirmDialog(
+      fileName = activeFileName,
+      onConfirmCancel = {
+        showCancelConfirm = false
+        onCancelActive()
+      },
+      onDismiss = {
+        showCancelConfirm = false
+      }
+    )
   }
 }

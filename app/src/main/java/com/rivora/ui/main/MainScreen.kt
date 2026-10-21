@@ -99,6 +99,8 @@ fun MainScreen(
         AddDownloadScreen(
           queueCount = (if (state.activeItem != null) 1 else 0) + state.queue.size,
           cellularActive = state.isCellularActive,
+          isWifiConnected = state.isWifiConnected,
+          isCellularConnected = state.isCellularConnected,
           onNavigateToQueue = { viewModel.switchView("queue") },
           onStartDownload = { url, fileName, totalBytes, isResumable, customTreeUri, displayPath ->
             viewModel.startDownload(url, fileName, totalBytes, isResumable, customTreeUri, displayPath)

@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.custom
+package com.rivora.ui.custom
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -63,8 +63,8 @@ fun ThroughputChartCanvas(
       if (history.size < 2) return@Canvas
 
       // Dynamically calculate chart ceiling from data with generous headroom so peaks and valleys are pronounced
-      val dataPeak = history.maxOrNull() ?: 50f
-      val chartCeiling = maxOf(dataPeak * 1.15f, 10f)
+      val dataPeak = history.maxOrNull() ?: 1f
+      val chartCeiling = maxOf(dataPeak * 1.25f, 0.2f)
       val count = history.size
 
       val totalPoints = mutableListOf<Offset>()

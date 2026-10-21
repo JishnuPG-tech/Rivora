@@ -20,6 +20,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.Request
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -116,8 +118,52 @@ class DownloadEngine private constructor(
     private var lastTelemetryTime = System.currentTimeMillis()
     private var lastSyncTime = System.currentTimeMillis()
 
+    @Volatile
+    private var smoothedWifiSpeedMBps: Float = 0f
+    @Volatile
+    private var smoothedCellSpeedMBps: Float = 0f
+
     init {
+        restorePersistedDownloads()
         startTelemetryLoop()
+    }
+
+    /**
+     * Scans the persistent storage directory (/sdcard/Download/Rivora) and restores all saved
+     * downloads in PAUSED state. Survives APK uninstallation and reinstallation!
+     */
+    private fun restorePersistedDownloads() {
+        try {
+            val session = RivoraPersistenceManager.restoreDownloads(context)
+            if (session.activeItem != null) {
+                chunkList.clear()
+                chunkList.addAll(session.activeChunks)
+                totalBytesDownloaded.set(session.activeItem.downloadedBytes)
+
+                val completedCount = session.activeChunks.count { it.status == ChunkStatus.COMPLETED }
+                _engineState.update { current ->
+                    current.copy(
+                        activeItem = session.activeItem,
+                        queue = session.queuedItems,
+                        finished = session.finishedItems,
+                        isPaused = true,
+                        isDownloading = false,
+                        completedChunks = completedCount,
+                        totalChunks = if (session.activeChunks.isNotEmpty()) session.activeChunks.size else current.totalChunks
+                    )
+                }
+                Log.d(TAG, "Restored active download from backup: ${session.activeItem.fileName} (${session.activeItem.downloadedBytes}/${session.activeItem.totalBytes} bytes)")
+            } else if (session.queuedItems.isNotEmpty() || session.finishedItems.isNotEmpty()) {
+                _engineState.update { current ->
+                    current.copy(
+                        queue = session.queuedItems,
+                        finished = session.finishedItems
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore persisted downloads: ${e.message}", e)
+        }
     }
 
     /**
@@ -130,7 +176,7 @@ class DownloadEngine private constructor(
         totalBytes: Long = 0L,
         isResumable: Boolean = true,
         customTreeUri: Uri? = null,
-        displayPath: String = "Downloads/"
+        displayPath: String = "Downloads/Rivora/"
     ) {
         scope.launch {
             try {
@@ -153,6 +199,22 @@ class DownloadEngine private constructor(
                         finalFileName = finalFileName ?: url.substringAfterLast('/').substringBefore('?')
                         if (finalFileName.isBlank()) finalFileName = "file_${System.currentTimeMillis()}.bin"
                     }
+                }
+
+                // Check if this item is ALREADY active or queued to prevent duplicates!
+                val existingActive = _engineState.value.activeItem
+                if (existingActive != null && (existingActive.downloadUrl == url || existingActive.fileName == finalFileName)) {
+                    Log.d(TAG, "Item already active, resuming: ${existingActive.fileName}")
+                    if (isPaused.get()) {
+                        resumeDownload()
+                    }
+                    return@launch
+                }
+
+                val existingQueued = _engineState.value.queue.firstOrNull { it.downloadUrl == url || it.fileName == finalFileName }
+                if (existingQueued != null) {
+                    Log.d(TAG, "Item already in queue: ${existingQueued.fileName}")
+                    return@launch
                 }
 
                 // Collect currently active and queued filenames to prevent duplicates
@@ -214,14 +276,33 @@ class DownloadEngine private constructor(
      */
     private suspend fun executeDownloadItem(item: DownloadItem, isResumable: Boolean) {
         val activeItem = item.copy(status = DownloadStatus.ACTIVE)
+
+        // Always check persistent storage for saved chunks of this specific file
+        val savedChunks = RivoraPersistenceManager.loadChunks(activeItem.fileName)
+        if (savedChunks.isNotEmpty()) {
+            chunkList.clear()
+            chunkList.addAll(savedChunks)
+            totalBytesDownloaded.set(savedChunks.sumOf { it.downloadedBytes })
+            Log.d(TAG, "Restored ${savedChunks.size} chunks for ${activeItem.fileName} (${totalBytesDownloaded.get()} bytes)")
+        } else if (chunkList.isEmpty()) {
+            partitionChunks(activeItem.totalBytes)
+            totalBytesDownloaded.set(0L)
+            Log.d(TAG, "Partitioned fresh chunks for ${activeItem.fileName}")
+        } else {
+            // Retain active chunks and calculate exact byte count
+            totalBytesDownloaded.set(chunkList.sumOf { it.downloadedBytes })
+        }
+
+        val completedCount = chunkList.count { it.status == ChunkStatus.COMPLETED }
+
         _engineState.update {
             it.copy(
                 activeItem = activeItem,
                 isDownloading = true,
                 isPaused = false,
                 error = null,
-                completedChunks = 0,
-                totalChunks = DEFAULT_CHUNKS_COUNT
+                completedChunks = completedCount,
+                totalChunks = chunkList.size.coerceAtLeast(DEFAULT_CHUNKS_COUNT)
             )
         }
 
@@ -232,10 +313,7 @@ class DownloadEngine private constructor(
             Log.w(TAG, "Failed to start notification service: ${e.message}")
         }
 
-        // Partition file into chunks
-        partitionChunks(activeItem.totalBytes)
-
-        // Allocate target file in Public Downloads or chosen custom folder
+        // Allocate target file in Public Downloads/Rivora or chosen custom folder
         val customUri = activeItem.destinationUri?.let { Uri.parse(it) }
         val target = DownloadStorageHelper.createDownloadTarget(
             context = context,
@@ -249,8 +327,10 @@ class DownloadEngine private constructor(
         val updatedItem = activeItem.copy(destinationUri = target.uri?.toString() ?: activeItem.destinationUri)
         _engineState.update { it.copy(activeItem = updatedItem) }
 
-        // Reset byte counters
-        totalBytesDownloaded.set(0L)
+        // Save initial state to backup folder immediately
+        RivoraPersistenceManager.saveDownloadState(updatedItem, chunkList, target.file)
+
+        // Reset telemetry byte counters
         wifiBytesTotal.set(0L)
         cellularBytesTotal.set(0L)
         lastWifiBytes = 0L
@@ -286,80 +366,121 @@ class DownloadEngine private constructor(
     }
 
     private suspend fun runDownloadWorkers(url: String, totalBytes: Long, isResumable: Boolean) {
-        val channel = Channel<ChunkProgress>(Channel.UNLIMITED)
-        chunkList.forEach { channel.trySend(it) }
-        channel.close()
-
-        val wifiClient = networkManager.getClient(NetworkAdapterType.WIFI)
-        val cellularClient = networkManager.getClient(NetworkAdapterType.CELLULAR)
-
-        val hasWifi = wifiClient != null
-        val hasCellular = cellularClient != null
-
-        val wifiWorkersCount = when {
-            hasWifi && hasCellular -> 3
-            hasWifi -> 5
-            else -> 0
-        }
-
-        val cellWorkersCount = when {
-            hasWifi && hasCellular -> 3
-            hasCellular -> 5
-            else -> 0
-        }
-
-        _engineState.update {
-            it.copy(
-                wifiStreams = wifiWorkersCount,
-                cellularStreams = cellWorkersCount
-            )
-        }
-
-        val workerJobs = mutableListOf<Job>()
-
-        if (wifiClient != null && wifiWorkersCount > 0) {
-            repeat(wifiWorkersCount) {
-                val job = scope.launch {
-                    for (chunk in channel) {
-                        if (isCancelled.get()) break
-                        while (isPaused.get()) delay(200)
-                        downloadChunk(wifiClient, url, chunk, NetworkAdapterType.WIFI, isResumable)
-                    }
-                }
-                workerJobs.add(job)
+        // Dynamic Concurrent Linked Queue for all pending chunks
+        val pendingChunks = ConcurrentLinkedQueue<ChunkProgress>()
+        chunkList.forEach { chunk ->
+            val chunkLen = if (chunk.endByte > 0) (chunk.endByte - chunk.startByte + 1) else -1L
+            if (chunk.status != ChunkStatus.COMPLETED && (chunkLen <= 0L || chunk.downloadedBytes < chunkLen)) {
+                chunk.status = ChunkStatus.PENDING
+                pendingChunks.add(chunk)
             }
         }
 
-        if (cellularClient != null && cellWorkersCount > 0) {
-            repeat(cellWorkersCount) {
-                val job = scope.launch {
-                    for (chunk in channel) {
-                        if (isCancelled.get()) break
-                        while (isPaused.get()) delay(200)
-                        downloadChunk(cellularClient, url, chunk, NetworkAdapterType.CELLULAR, isResumable)
-                    }
-                }
-                workerJobs.add(job)
+        val activeWorkers = ConcurrentHashMap<NetworkAdapterType, MutableList<Job>>()
+
+        fun cancelWorkersForAdapter(type: NetworkAdapterType) {
+            val jobList = activeWorkers[type] ?: return
+            synchronized(jobList) {
+                jobList.forEach { it.cancel() }
+                jobList.clear()
             }
         }
 
-        if (wifiWorkersCount == 0 && cellWorkersCount == 0) {
-            val defaultClient = networkManager.getDefaultClient()
-            _engineState.update { it.copy(cellularStreams = 4) }
-            repeat(4) {
-                val job = scope.launch {
-                    for (chunk in channel) {
-                        if (isCancelled.get()) break
-                        while (isPaused.get()) delay(200)
-                        downloadChunk(defaultClient, url, chunk, NetworkAdapterType.CELLULAR, isResumable)
+        fun ensureWorkersForAdapter(type: NetworkAdapterType, desiredStreams: Int) {
+            if (desiredStreams <= 0) {
+                cancelWorkersForAdapter(type)
+                return
+            }
+
+            val jobList = activeWorkers.getOrPut(type) { mutableListOf() }
+            synchronized(jobList) {
+                jobList.removeAll { it.isCompleted }
+                val needed = desiredStreams - jobList.size
+                if (needed <= 0) return
+
+                repeat(needed) {
+                    val job = scope.launch {
+                        while (!isCancelled.get() && pendingChunks.isNotEmpty()) {
+                            while (isPaused.get() && !isCancelled.get()) delay(200)
+                            while (!isCellularEnabled.get() && type == NetworkAdapterType.CELLULAR && !isCancelled.get()) delay(200)
+                            if (isCancelled.get()) break
+
+                            // Wait gracefully if device temporarily loses connectivity (e.g. Aeroplane mode)
+                            while (!networkManager.isAnyNetworkConnected() && !isCancelled.get()) {
+                                delay(500)
+                            }
+
+                            val chunk = pendingChunks.poll() ?: break
+                            // Fetch dynamic, current client bound to latest network socket
+                            val dynamicClient = if (type == NetworkAdapterType.UNKNOWN) {
+                                networkManager.getDefaultClient()
+                            } else {
+                                networkManager.getClient(type) ?: networkManager.getDefaultClient()
+                            }
+
+                            val success = downloadChunk(dynamicClient, url, chunk, type, isResumable)
+                            if (!success && chunk.status != ChunkStatus.COMPLETED && !isCancelled.get()) {
+                                // Put back on queue for another active stream or retry
+                                pendingChunks.add(chunk)
+                                delay(300)
+                            }
+                        }
                     }
+                    jobList.add(job)
                 }
-                workerJobs.add(job)
             }
         }
 
-        // Await all workers
-        workerJobs.forEach { it.join() }
+        // Active Monitor: Continuously adapt streams as networks connect/disconnect
+        val monitorJob = scope.launch {
+            networkManager.networkStates.collect { states ->
+                val wifiConnected = states[NetworkAdapterType.WIFI]?.isConnected == true
+                val cellConnected = states[NetworkAdapterType.CELLULAR]?.isConnected == true && isCellularEnabled.get()
+
+                val (targetWifiStreams, targetCellStreams) = when {
+                    wifiConnected && cellConnected -> 3 to 3
+                    wifiConnected -> 5 to 0
+                    cellConnected -> 0 to 5
+                    else -> 0 to 0
+                }
+
+                _engineState.update {
+                    it.copy(
+                        wifiStreams = targetWifiStreams,
+                        cellularStreams = targetCellStreams
+                    )
+                }
+
+                if (wifiConnected && targetWifiStreams > 0) {
+                    ensureWorkersForAdapter(NetworkAdapterType.WIFI, targetWifiStreams)
+                } else if (!wifiConnected) {
+                    cancelWorkersForAdapter(NetworkAdapterType.WIFI)
+                }
+
+                if (cellConnected && targetCellStreams > 0) {
+                    ensureWorkersForAdapter(NetworkAdapterType.CELLULAR, targetCellStreams)
+                } else if (!cellConnected) {
+                    cancelWorkersForAdapter(NetworkAdapterType.CELLULAR)
+                }
+
+                if (!wifiConnected && !cellConnected) {
+                    ensureWorkersForAdapter(NetworkAdapterType.UNKNOWN, 4)
+                }
+            }
+        }
+
+        // Wait until all chunks are completed or cancelled
+        while (!isCancelled.get() && chunkList.any { it.status != ChunkStatus.COMPLETED }) {
+            delay(200)
+        }
+
+        monitorJob.cancel()
+        activeWorkers.values.forEach { list ->
+            synchronized(list) {
+                list.forEach { it.cancel() }
+                list.clear()
+            }
+        }
 
         // Finalize completed download
         val target = currentStorageTarget
@@ -367,10 +488,21 @@ class DownloadEngine private constructor(
             DownloadStorageHelper.markCompleted(context, target)
             currentStorageTarget = null
 
-            _engineState.update { current ->
-                val active = current.activeItem ?: return@update current
+            val active = _engineState.value.activeItem
+            if (active != null) {
                 val finishedItem = active.copy(
                     downloadedBytes = active.totalBytes,
+                    status = DownloadStatus.FINISHED
+                )
+                RivoraPersistenceManager.saveDownloadState(finishedItem, chunkList, target.file)
+            }
+
+            smoothedWifiSpeedMBps = 0f
+            smoothedCellSpeedMBps = 0f
+            _engineState.update { current ->
+                val activeItem = current.activeItem ?: return@update current
+                val finishedItem = activeItem.copy(
+                    downloadedBytes = activeItem.totalBytes,
                     status = DownloadStatus.FINISHED
                 )
                 current.copy(
@@ -393,20 +525,29 @@ class DownloadEngine private constructor(
     }
 
     private suspend fun downloadChunk(
-        client: okhttp3.OkHttpClient,
+        initialClient: okhttp3.OkHttpClient,
         url: String,
         chunk: ChunkProgress,
         adapterType: NetworkAdapterType,
         isResumable: Boolean
-    ) {
+    ): Boolean {
         chunk.status = ChunkStatus.DOWNLOADING
         chunk.networkType = adapterType
 
         var retryCount = 0
-        val maxRetries = 3
+        val maxRetries = 5
 
         while (retryCount < maxRetries && !isCancelled.get()) {
             try {
+                // Ensure active client dynamically reflects the currently bound physical network
+                val client = if (retryCount == 0) {
+                    initialClient
+                } else if (adapterType == NetworkAdapterType.UNKNOWN) {
+                    networkManager.getDefaultClient()
+                } else {
+                    networkManager.getClient(adapterType) ?: networkManager.getDefaultClient()
+                }
+
                 val reqBuilder = Request.Builder().url(url)
                 if (isResumable && chunk.endByte > 0) {
                     val currentStart = chunk.startByte + chunk.downloadedBytes
@@ -427,7 +568,7 @@ class DownloadEngine private constructor(
                 while (stream.read(buffer).also { bytesRead = it } != -1) {
                     if (isCancelled.get()) {
                         response.close()
-                        return
+                        return false
                     }
                     while (isPaused.get()) delay(200)
                     while (!isCellularEnabled.get() && adapterType == NetworkAdapterType.CELLULAR && !isCancelled.get()) {
@@ -453,11 +594,19 @@ class DownloadEngine private constructor(
                         cellularBytesTotal.addAndGet(bytesRead.toLong())
                     }
 
-                    // Periodic disk sync every 1 second so File Manager sees updated file size
+                    // Periodic disk sync and state persistence every 1 second
                     val now = System.currentTimeMillis()
                     if (now - lastSyncTime > 1000) {
                         lastSyncTime = now
                         DownloadStorageHelper.sync(target)
+                        val active = _engineState.value.activeItem
+                        if (active != null) {
+                            RivoraPersistenceManager.saveDownloadState(
+                                item = active.copy(downloadedBytes = totalBytesDownloaded.get(), status = DownloadStatus.ACTIVE),
+                                chunks = chunkList,
+                                targetFile = target?.file
+                            )
+                        }
                     }
 
                     // Update UI state
@@ -473,17 +622,26 @@ class DownloadEngine private constructor(
 
                 val completed = chunkList.count { it.status == ChunkStatus.COMPLETED }
                 _engineState.update { it.copy(completedChunks = completed) }
-                return
+                return true
 
             } catch (e: Exception) {
-                if (e is CancellationException) return
-                Log.w(TAG, "Chunk ${chunk.index} attempt $retryCount failed: ${e.message}")
-                retryCount++
-                delay(500)
+                if (e is CancellationException) return false
+                Log.w(TAG, "Chunk ${chunk.index} attempt $retryCount failed on $adapterType: ${e.message}")
+                if (!networkManager.isAnyNetworkConnected()) {
+                    Log.d(TAG, "Network offline during chunk ${chunk.index}, pausing until connection restores...")
+                    while (!networkManager.isAnyNetworkConnected() && !isCancelled.get()) {
+                        delay(500)
+                    }
+                    Log.d(TAG, "Network restored, resuming chunk ${chunk.index}")
+                } else {
+                    retryCount++
+                    delay(300)
+                }
             }
         }
 
-        chunk.status = ChunkStatus.FAILED
+        chunk.status = ChunkStatus.PENDING
+        return false
     }
 
     /**
@@ -504,6 +662,13 @@ class DownloadEngine private constructor(
         val item = _engineState.value.queue.firstOrNull { it.id == itemId } ?: return
         // If an active download is running, put the current active download back into queue
         val currentActive = _engineState.value.activeItem
+        if (currentActive != null) {
+            RivoraPersistenceManager.saveDownloadState(
+                item = currentActive.copy(status = DownloadStatus.QUEUED, downloadedBytes = totalBytesDownloaded.get()),
+                chunks = chunkList,
+                targetFile = currentStorageTarget?.file
+            )
+        }
         stopActiveDownloadOnly()
 
         _engineState.update { current ->
@@ -521,33 +686,56 @@ class DownloadEngine private constructor(
      * Remove an item from the queue.
      */
     fun removeQueuedDownload(itemId: String) {
+        val item = _engineState.value.queue.firstOrNull { it.id == itemId }
+        if (item != null) {
+            RivoraPersistenceManager.deleteDownloadState(item.fileName)
+        }
         _engineState.update { current ->
             current.copy(queue = current.queue.filterNot { it.id == itemId })
         }
     }
 
     /**
-     * Pause the active download.
+     * Pause the active download and save its persistent backup state immediately.
      */
     fun pauseDownload() {
         if (!isPaused.get()) {
             isPaused.set(true)
+            smoothedWifiSpeedMBps = 0f
+            smoothedCellSpeedMBps = 0f
             _engineState.update { current ->
                 val active = current.activeItem?.copy(status = DownloadStatus.PAUSED)
                 current.copy(isPaused = true, activeItem = active)
+            }
+            val active = _engineState.value.activeItem
+            if (active != null) {
+                RivoraPersistenceManager.saveDownloadState(
+                    item = active.copy(status = DownloadStatus.PAUSED, downloadedBytes = totalBytesDownloaded.get()),
+                    chunks = chunkList,
+                    targetFile = currentStorageTarget?.file
+                )
             }
         }
     }
 
     /**
-     * Resume a paused download.
+     * Resume a paused download. If the background job is not running (e.g. after app restart/reinstall),
+     * spawns workers to resume right where the download left off without starting from byte 0.
      */
     fun resumeDownload() {
-        if (isPaused.get()) {
-            isPaused.set(false)
-            _engineState.update { current ->
-                val active = current.activeItem?.copy(status = DownloadStatus.ACTIVE)
-                current.copy(isPaused = false, activeItem = active)
+        val active = _engineState.value.activeItem ?: return
+        isPaused.set(false)
+        isCancelled.set(false)
+        smoothedWifiSpeedMBps = 0f
+        smoothedCellSpeedMBps = 0f
+        _engineState.update { current ->
+            val updated = current.activeItem?.copy(status = DownloadStatus.ACTIVE)
+            current.copy(isPaused = false, isDownloading = true, activeItem = updated)
+        }
+
+        if (activeJob == null || activeJob?.isActive != true) {
+            scope.launch {
+                executeDownloadItem(active, isResumable = true)
             }
         }
     }
@@ -564,11 +752,17 @@ class DownloadEngine private constructor(
     }
 
     /**
-     * Stop and cancel the active download, delete partially downloaded file from disk and MediaStore.
+     * Stop and cancel the active download, delete partially downloaded file from disk and MediaStore,
+     * and delete its persistent backup state.
      */
     fun cancelDownload() {
         isCancelled.set(true)
         stopActiveDownloadOnly()
+
+        val active = _engineState.value.activeItem
+        if (active != null) {
+            RivoraPersistenceManager.deleteDownloadState(active.fileName, currentStorageTarget?.file)
+        }
 
         // Delete the file cleanly from disk & MediaStore
         currentStorageTarget?.let { target ->
@@ -607,9 +801,10 @@ class DownloadEngine private constructor(
     }
 
     /**
-     * Delete an item from queue or finished history, and remove its file.
+     * Delete an item from queue or finished history, remove its file, and delete its backup state.
      */
     fun deleteDownload(item: DownloadItem) {
+        RivoraPersistenceManager.deleteDownloadState(item.fileName)
         if (_engineState.value.activeItem?.id == item.id) {
             cancelDownload()
             return
@@ -663,17 +858,33 @@ class DownloadEngine private constructor(
 
                 val isDownloading = _engineState.value.isDownloading
                 val isPausedVal = isPaused.get()
-                val wifiStreams = _engineState.value.wifiStreams
-                val cellStreams = _engineState.value.cellularStreams
 
-                val wifiSpeedMBps = if (isDownloading && !isPausedVal && wifiStreams > 0) {
-                    ((wifiDelta / dtSec) / (1024f * 1024f)).coerceAtLeast(0f)
-                } else 0f
+                if (isDownloading && !isPausedVal) {
+                    val rawWifi = ((wifiDelta / dtSec) / (1024f * 1024f)).coerceAtLeast(0f)
+                    val rawCell = ((cellDelta / dtSec) / (1024f * 1024f)).coerceAtLeast(0f)
 
-                val cellSpeedMBps = if (isDownloading && !isPausedVal && cellStreams > 0) {
-                    ((cellDelta / dtSec) / (1024f * 1024f)).coerceAtLeast(0f)
-                } else 0f
+                    // Exponential Moving Average (EMA) with alpha = 0.40f to eliminate 0.0 drops between TCP packet bursts
+                    smoothedWifiSpeedMBps = if (smoothedWifiSpeedMBps <= 0.001f) {
+                        rawWifi
+                    } else {
+                        (0.40f * rawWifi + 0.60f * smoothedWifiSpeedMBps)
+                    }
 
+                    smoothedCellSpeedMBps = if (smoothedCellSpeedMBps <= 0.001f) {
+                        rawCell
+                    } else {
+                        (0.40f * rawCell + 0.60f * smoothedCellSpeedMBps)
+                    }
+
+                    if (rawWifi == 0f && smoothedWifiSpeedMBps < 0.015f) smoothedWifiSpeedMBps = 0f
+                    if (rawCell == 0f && smoothedCellSpeedMBps < 0.015f) smoothedCellSpeedMBps = 0f
+                } else {
+                    smoothedWifiSpeedMBps = 0f
+                    smoothedCellSpeedMBps = 0f
+                }
+
+                val wifiSpeedMBps = smoothedWifiSpeedMBps
+                val cellSpeedMBps = smoothedCellSpeedMBps
                 val totalSpeedMBps = wifiSpeedMBps + cellSpeedMBps
 
                 _engineState.update { state ->

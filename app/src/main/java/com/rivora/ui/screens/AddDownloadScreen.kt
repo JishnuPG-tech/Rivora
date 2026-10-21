@@ -69,7 +69,9 @@ data class DetectedFileInfo(
 @Composable
 fun AddDownloadScreen(
   queueCount: Int = 0,
-  cellularActive: Boolean,
+  cellularActive: Boolean = true,
+  isWifiConnected: Boolean = false,
+  isCellularConnected: Boolean = true,
   onNavigateToQueue: () -> Unit,
   onStartDownload: (url: String, fileName: String, totalBytes: Long, isResumable: Boolean, customTreeUri: Uri?, displayPath: String) -> Unit,
   modifier: Modifier = Modifier
@@ -80,7 +82,7 @@ fun AddDownloadScreen(
   var detectedFile by remember { mutableStateOf<DetectedFileInfo?>(null) }
   var probeError by remember { mutableStateOf<String?>(null) }
   var validationWarning by remember { mutableStateOf<String?>(null) }
-  var savePath by remember { mutableStateOf("Downloads/") }
+  var savePath by remember { mutableStateOf("Downloads/Rivora/") }
   var selectedFolderUri by remember { mutableStateOf<Uri?>(null) }
   var selectedTorrentName by remember { mutableStateOf<String?>(null) }
 
@@ -534,52 +536,77 @@ fun AddDownloadScreen(
             )
           )
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Cellular Pill
-            Row(
-              modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color(0xFF261C12))
-                .border(1.dp, Color(0xFF8A4E1A), RoundedCornerShape(999.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              Box(
+            // Wi-Fi Pill (Orange Theme)
+            if (isWifiConnected) {
+              Row(
                 modifier = Modifier
-                  .size(7.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFFE5A044))
-              )
-              Text(
-                text = "Cellular",
-                style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
-                  color = Color(0xFFEDEDEF)
+                  .clip(RoundedCornerShape(999.dp))
+                  .background(RivoraColor.OrangeDim)
+                  .border(1.dp, RivoraColor.OrangeBorder, RoundedCornerShape(999.dp))
+                  .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                NetworkDot(
+                  color = RivoraColor.OrangeBright,
+                  size = 8.dp
                 )
-              )
+                Text(
+                  text = "Wi-Fi",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                    color = Color(0xFFEDEDEF)
+                  )
+                )
+              }
             }
 
-            // Wi-Fi Pill
-            Row(
-              modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color(0xFF102422))
-                .border(1.dp, Color(0xFF236B64), RoundedCornerShape(999.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-              Box(
+            // Cellular Pill (White / Crisp Silver Theme)
+            if (isCellularConnected) {
+              Row(
                 modifier = Modifier
-                  .size(7.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFF4FD1C5))
-              )
-              Text(
-                text = "Wi-Fi",
-                style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
-                  color = Color(0xFFEDEDEF)
+                  .clip(RoundedCornerShape(999.dp))
+                  .background(RivoraColor.StreamSecondaryDim)
+                  .border(1.dp, RivoraColor.StreamSecondaryBorder, RoundedCornerShape(999.dp))
+                  .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                NetworkDot(
+                  color = Color(0xFFFFFFFF),
+                  size = 8.dp
                 )
-              )
+                Text(
+                  text = "Cellular",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                    color = Color(0xFFEDEDEF)
+                  )
+                )
+              }
+            }
+
+            // Offline Indicator (if neither connected)
+            if (!isWifiConnected && !isCellularConnected) {
+              Row(
+                modifier = Modifier
+                  .clip(RoundedCornerShape(999.dp))
+                  .background(Color(0xFF1E1E22))
+                  .border(1.dp, RivoraColor.BorderSubtle, RoundedCornerShape(999.dp))
+                  .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+              ) {
+                NetworkDot(
+                  color = RivoraColor.TextDisabled,
+                  size = 8.dp,
+                  hasHalo = false
+                )
+                Text(
+                  text = "Offline",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                    color = RivoraColor.TextMuted
+                  )
+                )
+              }
             }
           }
         }

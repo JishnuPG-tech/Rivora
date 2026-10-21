@@ -76,27 +76,31 @@ object ByteFormatter {
         if (isBits) {
             val bitsPerSec = bytesPerSec * 8.0
             val kb = 1024.0
+            val mbThreshold = 1000.0 * kb
+            val gbThreshold = 1000.0 * 1024.0 * kb
             val mb = kb * 1024.0
             val gb = mb * 1024.0
 
             return when {
                 bitsPerSec <= 0.0 -> FormattedSpeed("0.0", "Kbps")
                 bitsPerSec < kb -> FormattedSpeed(String.format(Locale.US, "%.0f", bitsPerSec), "bps")
-                bitsPerSec < mb -> FormattedSpeed(String.format(Locale.US, "%.1f", bitsPerSec / kb), "Kbps")
-                bitsPerSec < gb -> FormattedSpeed(String.format(Locale.US, "%.1f", bitsPerSec / mb), "Mbps")
+                bitsPerSec < mbThreshold -> FormattedSpeed(String.format(Locale.US, "%.1f", bitsPerSec / kb), "Kbps")
+                bitsPerSec < gbThreshold -> FormattedSpeed(String.format(Locale.US, "%.1f", bitsPerSec / mb), "Mbps")
                 else -> FormattedSpeed(String.format(Locale.US, "%.2f", bitsPerSec / gb), "Gbps")
             }
         } else {
             val kb = 1024.0
-            val mb = kb * 1024.0
+            val mbThreshold = 1000.0 * kb
+            val gbThreshold = 1000.0 * 1024.0 * kb
+            val mb = 1024.0 * 1024.0
             val gb = mb * 1024.0
             val tb = gb * 1024.0
 
             return when {
                 bytesPerSec <= 0.0 -> FormattedSpeed("0.0", "KB/s")
                 bytesPerSec < kb -> FormattedSpeed(String.format(Locale.US, "%.0f", bytesPerSec), "B/s")
-                bytesPerSec < mb -> FormattedSpeed(String.format(Locale.US, "%.1f", bytesPerSec / kb), "KB/s")
-                bytesPerSec < gb -> FormattedSpeed(String.format(Locale.US, "%.1f", bytesPerSec / mb), "MB/s")
+                bytesPerSec < mbThreshold -> FormattedSpeed(String.format(Locale.US, "%.1f", bytesPerSec / kb), "KB/s")
+                bytesPerSec < gbThreshold -> FormattedSpeed(String.format(Locale.US, "%.1f", bytesPerSec / mb), "MB/s")
                 bytesPerSec < tb -> FormattedSpeed(String.format(Locale.US, "%.2f", bytesPerSec / gb), "GB/s")
                 else -> FormattedSpeed(String.format(Locale.US, "%.2f", bytesPerSec / tb), "TB/s")
             }

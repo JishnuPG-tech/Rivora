@@ -67,7 +67,7 @@ fun NewDownloadDialog(
   isCellularConnected: Boolean = true
 ) {
   var urlInput by remember { mutableStateOf("") }
-  var savePath by remember { mutableStateOf("Downloads/") }
+  var savePath by remember { mutableStateOf("Downloads/Rivora/") }
   var selectedFolderUri by remember { mutableStateOf<Uri?>(null) }
   var isChecking by remember { mutableStateOf(false) }
   var detectedFile by remember { mutableStateOf<DetectedFileInfo?>(null) }
@@ -389,40 +389,71 @@ fun NewDownloadDialog(
               )
               Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (isWifiConnected) {
-                  Box(
+                  Row(
                     modifier = Modifier
                       .clip(RoundedCornerShape(999.dp))
                       .background(RivoraColor.OrangeDim)
                       .border(1.dp, RivoraColor.OrangeBorder, RoundedCornerShape(999.dp))
-                      .padding(horizontal = 10.dp, vertical = 4.dp)
+                      .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                   ) {
-                    Text(
-                      text = "● Wi-Fi",
+                    NetworkDot(
                       color = RivoraColor.OrangeBright,
-                      style = RivoraType.LivePill
+                      size = 8.dp
+                    )
+                    Text(
+                      text = "Wi-Fi",
+                      style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                        color = Color(0xFFEDEDEF)
+                      )
                     )
                   }
                 }
                 if (isCellularConnected) {
-                  Box(
+                  Row(
                     modifier = Modifier
                       .clip(RoundedCornerShape(999.dp))
                       .background(RivoraColor.StreamSecondaryDim)
                       .border(1.dp, RivoraColor.StreamSecondaryBorder, RoundedCornerShape(999.dp))
-                      .padding(horizontal = 10.dp, vertical = 4.dp)
+                      .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                   ) {
+                    NetworkDot(
+                      color = Color(0xFFFFFFFF),
+                      size = 8.dp
+                    )
                     Text(
-                      text = "● Cellular",
-                      color = RivoraColor.StreamSecondary,
-                      style = RivoraType.LivePill
+                      text = "Cellular",
+                      style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                        color = Color(0xFFEDEDEF)
+                      )
                     )
                   }
                 }
                 if (!isWifiConnected && !isCellularConnected) {
-                  Text(
-                    text = "No connection",
-                    style = RivoraType.MetaLine.copy(color = RivoraColor.TextMuted)
-                  )
+                  Row(
+                    modifier = Modifier
+                      .clip(RoundedCornerShape(999.dp))
+                      .background(Color(0xFF1E1E22))
+                      .border(1.dp, RivoraColor.BorderSubtle, RoundedCornerShape(999.dp))
+                      .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                  ) {
+                    NetworkDot(
+                      color = RivoraColor.TextDisabled,
+                      size = 8.dp,
+                      hasHalo = false
+                    )
+                    Text(
+                      text = "Offline",
+                      style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                        color = RivoraColor.TextMuted
+                      )
+                    )
+                  }
                 }
               }
             }
@@ -819,6 +850,74 @@ fun LimitsDialog(onDismiss: () -> Unit) {
           height = 44.dp,
           modifier = Modifier.fillMaxWidth()
         )
+      }
+    }
+  }
+}
+
+
+/**
+ * Confirmation dialog before canceling an active download and permanently deleting its file.
+ * Asks the user for double checking so in-progress data isn't deleted by accident.
+ */
+@Composable
+fun CancelDownloadConfirmDialog(
+  fileName: String,
+  onConfirmCancel: () -> Unit,
+  onDismiss: () -> Unit
+) {
+  Dialog(
+    onDismissRequest = onDismiss,
+    properties = DialogProperties(usePlatformDefaultWidth = false)
+  ) {
+    Box(
+      modifier = Modifier
+        .fillMaxWidth(0.90f)
+        .clip(RoundedCornerShape(16.dp))
+        .background(RivoraColor.Surface)
+        .border(1.dp, RivoraColor.BorderSubtle, RoundedCornerShape(16.dp))
+    ) {
+      Column(
+        modifier = Modifier.padding(22.dp)
+      ) {
+        Text(
+          text = "Cancel Download?",
+          style = RivoraType.rivoraText(RivoraType.Sans, 18f, FontWeight.SemiBold, 0f, 22f).copy(
+            color = Color(0xFFEDEDEF)
+          )
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+          text = "Are you sure you want to permanently delete \"$fileName\"? This will remove the file from your device.",
+          style = RivoraType.rivoraText(RivoraType.Sans, 14f, FontWeight.Normal, 0f, 20f).copy(
+            color = Color(0xFFA1A1A8)
+          )
+        )
+
+        Spacer(modifier = Modifier.height(22.dp))
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          RivoraButton(
+            text = "Keep Download",
+            onClick = onDismiss,
+            variant = RivoraButtonVariant.DARK,
+            height = 40.dp,
+            modifier = Modifier.weight(1f)
+          )
+
+          RivoraButton(
+            text = "Delete File",
+            onClick = onConfirmCancel,
+            variant = RivoraButtonVariant.DANGER,
+            height = 40.dp,
+            modifier = Modifier.weight(1f)
+          )
+        }
       }
     }
   }

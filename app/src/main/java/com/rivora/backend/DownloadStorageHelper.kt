@@ -1,4 +1,4 @@
-﻿package com.rivora.backend
+package com.rivora.backend
 
 import android.content.ContentValues
 import android.content.Context
@@ -135,11 +135,12 @@ object DownloadStorageHelper {
         var counter = 1
 
         val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val rivoraDir = RivoraPersistenceManager.getRivoraDir()
 
         while (true) {
             val inActiveList = activeNames.any { it.equals(candidate, ignoreCase = true) }
             val fileExistsOnDisk = try {
-                File(publicDir, candidate).exists()
+                File(rivoraDir, candidate).exists() || File(publicDir, candidate).exists()
             } catch (_: Exception) {
                 false
             }
@@ -169,7 +170,10 @@ object DownloadStorageHelper {
         if (customTreeUri != null) {
             try {
                 val docFile = DocumentFile.fromTreeUri(context, customTreeUri)
-                val newFile = docFile?.createFile(mimeType, fileName)
+                val rivoraSubDir = docFile?.findFile(RivoraPersistenceManager.RIVORA_FOLDER_NAME)
+                    ?: docFile?.createDirectory(RivoraPersistenceManager.RIVORA_FOLDER_NAME)
+                val targetDir = rivoraSubDir ?: docFile
+                val newFile = targetDir?.createFile(mimeType, fileName)
                 if (newFile != null) {
                     val pfd = context.contentResolver.openFileDescriptor(newFile.uri, "rw")
                         ?: throw IllegalStateException("Could not open PFD for ${newFile.uri}")
@@ -177,25 +181,25 @@ object DownloadStorageHelper {
                     if (totalBytes > 0L) {
                         sink.setLength(totalBytes)
                     }
+                    val folderName = customTreeUri.lastPathSegment?.substringAfterLast(':') ?: "Custom"
                     return StorageTarget(
                         uri = newFile.uri,
                         file = null,
                         sink = sink,
                         displayName = fileName,
-                        displayPath = customTreeUri.lastPathSegment?.substringAfterLast(':') ?: "Custom/"
+                        displayPath = "$folderName/Rivora/"
                     )
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to create in customTreeUri, falling back to public Downloads: ${e.message}")
+                Log.w(TAG, "Failed to create in customTreeUri, falling back to persistent Rivora: ${e.message}")
             }
         }
 
-        // 2. Direct public /sdcard/Download file (fastest & most direct for File Managers)
+        // 2. Direct public /sdcard/Download/Rivora file (dedicated app folder)
         try {
-            val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!publicDir.exists()) publicDir.mkdirs()
-            val destFile = File(publicDir, fileName)
-            if (publicDir.canWrite()) {
+            val rivoraDir = RivoraPersistenceManager.getRivoraDir()
+            val destFile = File(rivoraDir, fileName)
+            if (rivoraDir.canWrite() || rivoraDir.exists()) {
                 val raf = RandomAccessFile(destFile, "rw")
                 val sink = RafFileSink(raf)
                 if (totalBytes > 0L) {
@@ -208,20 +212,20 @@ object DownloadStorageHelper {
                     file = destFile,
                     sink = sink,
                     displayName = fileName,
-                    displayPath = "Downloads/"
+                    displayPath = "Downloads/Rivora/"
                 )
             }
         } catch (e: Exception) {
             Log.d(TAG, "Direct public file write unpermitted, trying MediaStore: ${e.message}")
         }
 
-        // 3. MediaStore.Downloads API (Standard Android 10+ scoped storage for public Downloads)
+        // 3. MediaStore.Downloads API (Standard Android 10+ scoped storage for public Downloads/Rivora)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                     put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/${RivoraPersistenceManager.RIVORA_FOLDER_NAME}")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
                 val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -237,7 +241,7 @@ object DownloadStorageHelper {
                         file = null,
                         sink = sink,
                         displayName = fileName,
-                        displayPath = "Downloads/"
+                        displayPath = "Downloads/Rivora/"
                     )
                 }
             } catch (e: Exception) {
@@ -305,13 +309,16 @@ object DownloadStorageHelper {
     }
 
     /**
-     * Deletes the target file completely from disk and MediaStore when cancelled.
+     * Deletes the target file completely from disk and MediaStore when cancelled, and removes its backup state.
      */
     fun deleteTarget(context: Context, target: StorageTarget?) {
         if (target == null) return
         try {
             target.sink.close()
         } catch (_: Exception) {}
+
+        // Remove persistent backup metadata
+        RivoraPersistenceManager.deleteDownloadState(target.displayName, target.file)
 
         target.file?.let { file ->
             try {
@@ -327,15 +334,23 @@ object DownloadStorageHelper {
     }
 
     /**
-     * Deletes a file by item representation.
+     * Deletes a file by item representation and clears its backup metadata.
      */
     fun deleteItemFile(context: Context, fileName: String, fileUriString: String?) {
+        // Remove persistent backup metadata
+        RivoraPersistenceManager.deleteDownloadState(fileName)
+
         if (!fileUriString.isNullOrBlank()) {
             try {
                 val uri = Uri.parse(fileUriString)
                 context.contentResolver.delete(uri, null, null)
             } catch (_: Exception) {}
         }
+        try {
+            val rivoraDir = RivoraPersistenceManager.getRivoraDir()
+            val file = File(rivoraDir, fileName)
+            if (file.exists()) file.delete()
+        } catch (_: Exception) {}
         try {
             val publicDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             val file = File(publicDir, fileName)
@@ -365,8 +380,13 @@ object DownloadStorageHelper {
                 return
             }
 
+            val rivoraFile = File(RivoraPersistenceManager.getRivoraDir(), fileName)
             val publicFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
-            val fileToOpen = if (publicFile.exists()) publicFile else File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+            val fileToOpen = when {
+                rivoraFile.exists() -> rivoraFile
+                publicFile.exists() -> publicFile
+                else -> File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+            }
 
             if (fileToOpen.exists()) {
                 val contentUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", fileToOpen)

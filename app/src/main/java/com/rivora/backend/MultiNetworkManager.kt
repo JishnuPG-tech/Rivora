@@ -1,4 +1,4 @@
-﻿package com.rivora.backend
+package com.rivora.backend
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import okhttp3.ConnectionPool
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import java.net.Inet4Address
@@ -119,16 +120,36 @@ class MultiNetworkManager(
     )
     val networkStates: StateFlow<Map<NetworkAdapterType, NetworkAdapterInfo>> = _networkStates.asStateFlow()
 
+    private var isWifiRequested = false
     private var isCellularRequested = false
     private var isRegistered = false
+
+    // Fast DNS cache to resolve hostnames across both adapters without DoT stalls
+    private val hostDnsCache = ConcurrentHashMap<String, List<java.net.InetAddress>>()
 
     // Callbacks
     private var wifiCallback: ConnectivityManager.NetworkCallback? = null
     private var cellularCallback: ConnectivityManager.NetworkCallback? = null
     private var ethernetCallback: ConnectivityManager.NetworkCallback? = null
+    private var defaultCallback: ConnectivityManager.NetworkCallback? = null
 
     /**
-     * Start monitoring networks and request concurrent cellular connectivity.
+     * Checks if at least one internet-capable network interface is actively connected.
+     */
+    fun isAnyNetworkConnected(): Boolean {
+        if (boundNetworks.isNotEmpty()) return true
+        val active = connectivityManager?.activeNetwork ?: return false
+        val caps = connectivityManager.getNetworkCapabilities(active) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    /**
+     * Returns count of actively connected and bound network adapters.
+     */
+    fun getConnectedAdaptersCount(): Int = boundNetworks.size
+
+    /**
+     * Start monitoring networks and request concurrent Wi-Fi and Cellular connectivity.
      */
     fun startMonitoring() {
         if (connectivityManager == null || isRegistered) return
@@ -178,14 +199,8 @@ class MultiNetworkManager(
                 Log.w(TAG, "Initial network scan error: ${e.message}")
             }
 
-            // 1. Monitor Wi-Fi
-            val wifiRequest = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .build()
-
-            wifiCallback = createCallback(NetworkAdapterType.WIFI, "Wi-Fi", "wlan0")
-            connectivityManager.registerNetworkCallback(wifiRequest, wifiCallback!!)
+            // 1. Request Wi-Fi concurrent session
+            requestWifiConcurrency()
 
             // 2. Request Cellular concurrent connection
             requestCellularConcurrency()
@@ -199,10 +214,82 @@ class MultiNetworkManager(
             ethernetCallback = createCallback(NetworkAdapterType.ETHERNET, "Ethernet", "eth0")
             connectivityManager.registerNetworkCallback(ethernetRequest, ethernetCallback!!)
 
+            // 4. Register default network callback for system-wide resilience (e.g. Aeroplane mode toggle)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                defaultCallback = object : ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: Network) {
+                        Log.d(TAG, "Default network restored: $network")
+                        if (!isWifiRequested) requestWifiConcurrency()
+                        if (!isCellularRequested) requestCellularConcurrency()
+                    }
+                    override fun onLost(network: Network) {
+                        Log.d(TAG, "Default network lost: $network")
+                        clientCache.clear()
+                    }
+                }
+                connectivityManager.registerDefaultNetworkCallback(defaultCallback!!)
+            }
+
             isRegistered = true
-            Log.d(TAG, "Multi-network callbacks successfully registered.")
+            Log.d(TAG, "Multi-network callbacks successfully registered with concurrent Wi-Fi & Cellular.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register network callbacks: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Instructs Android OS to maintain an active Wi-Fi session concurrently with Cellular.
+     */
+    fun requestWifiConcurrency() {
+        if (connectivityManager == null || isWifiRequested) return
+        try {
+            val wifiRequest = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                .build()
+
+            wifiCallback = createCallback(NetworkAdapterType.WIFI, "Wi-Fi", "wlan0")
+            try {
+                // requestNetwork guarantees Android allocates and guards the Wi-Fi connection
+                connectivityManager.requestNetwork(wifiRequest, wifiCallback!!)
+                isWifiRequested = true
+                Log.d(TAG, "Requested concurrent Wi-Fi network session.")
+            } catch (e: Exception) {
+                Log.w(TAG, "requestNetwork for Wi-Fi fell back to registerNetworkCallback: ${e.message}")
+                connectivityManager.registerNetworkCallback(wifiRequest, wifiCallback!!)
+                isWifiRequested = true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to request Wi-Fi network: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Releases Wi-Fi concurrency callback.
+     */
+    fun releaseWifiConcurrency() {
+        if (connectivityManager == null || !isWifiRequested || wifiCallback == null) return
+        try {
+            connectivityManager.unregisterNetworkCallback(wifiCallback!!)
+            wifiCallback = null
+            isWifiRequested = false
+            boundNetworks.remove(NetworkAdapterType.WIFI)
+            clientCache.remove(NetworkAdapterType.WIFI)
+            _networkStates.update { current ->
+                val existing = current[NetworkAdapterType.WIFI] ?: NetworkAdapterInfo(
+                    type = NetworkAdapterType.WIFI,
+                    name = "Wi-Fi",
+                    interfaceName = "wlan0"
+                )
+                current + (NetworkAdapterType.WIFI to existing.copy(
+                    isAvailable = false,
+                    isConnected = false,
+                    streamsCount = 0
+                ))
+            }
+            Log.d(TAG, "Released concurrent Wi-Fi network session.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to unregister Wi-Fi callback: ${e.message}", e)
         }
     }
 
@@ -264,14 +351,14 @@ class MultiNetworkManager(
         if (connectivityManager == null || !isRegistered) return
 
         try {
-            wifiCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
             ethernetCallback?.let { connectivityManager.unregisterNetworkCallback(it) }
+            releaseWifiConcurrency()
             releaseCellularConcurrency()
-            wifiCallback = null
             ethernetCallback = null
             isRegistered = false
             boundNetworks.clear()
             clientCache.clear()
+            hostDnsCache.clear()
             Log.d(TAG, "Stopped all network monitoring.")
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping network callbacks: ${e.message}", e)
@@ -279,23 +366,56 @@ class MultiNetworkManager(
     }
 
     /**
-     * Returns an OkHttpClient bound strictly to the requested network interface,
-     * or null if the adapter is not currently active and bound.
+     * Returns an OkHttpClient bound strictly to the requested network interface.
+     * Crucially uses an isolated, 0-keepalive ConnectionPool so TCP/TLS connections
+     * are NEVER cross-routed or shared between Wi-Fi and Cellular sockets!
      */
     fun getClient(type: NetworkAdapterType): OkHttpClient? {
         val cached = clientCache[type]
         if (cached != null) return cached
 
         val network = boundNetworks[type] ?: return null
-        val newClient = baseClient.newBuilder()
+        val newClient = OkHttpClient.Builder()
+            .connectionPool(ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
             .socketFactory(network.socketFactory)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .followRedirects(true)
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<java.net.InetAddress> {
-                    return try {
-                        network.getAllByName(hostname).toList()
-                    } catch (e: Exception) {
-                        Dns.SYSTEM.lookup(hostname)
+                    // Check fast cache first
+                    hostDnsCache[hostname]?.let { return it }
+
+                    // Attempt resolving directly on bound network
+                    val networkAddresses = try {
+                        val addresses = network.getAllByName(hostname).toList()
+                        if (addresses.isNotEmpty()) addresses else null
+                    } catch (_: Exception) {
+                        null
                     }
+
+                    if (networkAddresses != null) {
+                        hostDnsCache[hostname] = networkAddresses
+                        return networkAddresses
+                    }
+
+                    // Fallback to system resolver to avoid Private DNS (DoT) hanging
+                    val fallback = try {
+                        Dns.SYSTEM.lookup(hostname)
+                    } catch (_: Exception) {
+                        try {
+                            java.net.InetAddress.getAllByName(hostname).toList()
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+
+                    if (fallback.isNotEmpty()) {
+                        hostDnsCache[hostname] = fallback
+                    }
+                    return fallback
                 }
             })
             .build()

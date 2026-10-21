@@ -391,6 +391,7 @@ private fun InterfaceSplitRow(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(
+          modifier = Modifier.weight(1f, fill = false),
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -398,30 +399,36 @@ private fun InterfaceSplitRow(
           Column {
             Text(
               text = name,
-              style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary, fontWeight = FontWeight.SemiBold)
+              style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary, fontWeight = FontWeight.SemiBold),
+              maxLines = 1
             )
             Text(
               text = interfaceInfo,
-              style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Normal, 0f, 14f).copy(color = RivoraColor.TextMuted)
+              style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Normal, 0f, 14f).copy(color = RivoraColor.TextMuted),
+              maxLines = 1
             )
           }
         }
 
         Row(
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(8.dp)
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
           Text(
             text = speedText,
             style = RivoraType.rivoraText(RivoraType.Mono, 14f, FontWeight.Bold, 0f, 18f).copy(
               color = if (shareRatio > 0) barColor else RivoraColor.TextMuted
-            )
+            ),
+            maxLines = 1,
+            softWrap = false
           )
           Text(
             text = "· $sharePercentText",
             style = RivoraType.rivoraText(RivoraType.Mono, 12.5f, FontWeight.SemiBold, 0f, 16f).copy(
               color = RivoraColor.TextSecondary
-            )
+            ),
+            maxLines = 1,
+            softWrap = false
           )
         }
       }
