@@ -9,6 +9,16 @@ build/
 */build/
 app/build/
 
+# Signing files and credentials
+*.jks
+*.keystore
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.properties
+*.env
+
 # Gradle files
 .gradle/
 .kotlin/
