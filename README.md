@@ -1,60 +1,72 @@
-# Rivora
+<p align="center">
+  <img src="assets/logo.png" alt="Rivora Logo" width="112" height="112" />
+</p>
 
-Rivora is a multi-network download manager and the Android client for Plexoo.
+<h1 align="center">Rivora</h1>
 
-It accelerates downloads by splitting files into parallel chunks, distributing streams across multiple concurrent network interfaces (Wi-Fi and Cellular simultaneously), and streaming directly to Android storage with complete resume capability.
+<p align="center">
+  Multi-network download manager for Android and mobile client for Plexoo.
+</p>
 
 ---
 
-## Architecture and Core Capabilities
+## Overview
+
+Rivora accelerates file transfers by partitioning downloads into parallel segments, routing concurrent streams over both Wi-Fi and Cellular interfaces simultaneously, and writing directly to persistent Android storage with byte-accurate verification and resume capability.
+
+---
+
+## Architecture and Key Capabilities
 
 ### Multi-Network Stream Bonding
-Rivora leverages Android connectivity APIs to bind sockets directly to underlying network interfaces. By concurrently dispatching HTTP range requests over both Wi-Fi and Cellular (4G/5G) connections, bandwidth is combined to maximize transfer throughput.
+Binds network sockets directly to distinct physical and wireless interfaces. Transfers execute concurrently across Wi-Fi and Cellular (4G/5G) data paths to pool combined network bandwidth.
+
+### Real-Time Link Validation
+Probes target URLs before queuing to verify direct downloadable files (videos, audio, archives, software packages, documents, and torrents/magnets). Detects HTML web pages and connection failures, providing instant feedback without queuing non-binary content.
 
 ### Liquid Chunk Progress Matrix
-A custom Canvas component provides real-time visual feedback of chunk distribution and download progress. Active chunks fill progressively from bottom to top, reflecting true byte-level completion rates.
+A custom canvas rendering engine displays active chunk distribution and allocation metrics. Individual chunk segments fill smoothly based on byte-level completion rates.
 
-### Resumable Chunked Storage Engine
-Downloads are written directly to pre-allocated target storage using random-access seek-and-write operations. Each completed chunk updates persistent state, ensuring transfers can be paused, resumed, or recovered across application restarts without file corruption.
+### Resumable Storage Engine
+Streams directly to pre-allocated files using seek-and-write operations. Chunk offsets and completion flags are persistently stored, allowing uninterrupted pause, resume, and failure recovery.
 
-### Interface Throughput Telemetry
-Real-time telemetry computes combined and per-interface transfer rates. A dedicated throughput monitor visualizes historical speed curves and interface contribution ratios.
+### Real-Time Throughput Telemetry
+Calculates instantaneous and average throughput across all active connections. Displays interactive speed curves and individual interface contribution ratios.
 
 ### Adaptive Precision Formatting
-File sizes and transfer speeds scale dynamically across bytes, kilobytes, megabytes, and gigabytes, ensuring accurate values without artificial rounding errors.
+Dynamically scales bytes, kilobytes, megabytes, and gigabytes without artificial rounding discrepancies.
 
-### Background Transfer Service
-A foreground Android service with status bar notifications provides continuous background downloads, displaying active progress, transfer speeds, and chunk completion metrics.
+### Foreground Download Service
+Provides continuous background operations with status bar progress indicators, real-time transfer rates, and interactive notification controls.
 
 ---
 
 ## Technical Specifications
 
-- **Target Architecture**: Modern Android (API 24+)
-- **UI Framework**: Jetpack Compose with Material 3 Design
-- **Navigation**: Jetpack Navigation 3
-- **Networking**: OkHttp multi-interface socket routing
-- **Asynchronous Processing**: Kotlin Coroutines and StateFlow reactive state management
-- **Build Configuration**: Gradle with Kotlin DSL
+- **Target Platform**: Android 7.0+ (API Level 24+)
+- **UI Architecture**: Jetpack Compose with Material 3 Design
+- **Networking**: Multi-interface OkHttp socket routing
+- **Concurrency**: Kotlin Coroutines and StateFlow reactive pipelines
+- **Build System**: Gradle with Kotlin DSL
 
 ---
 
-## Building and Verification
+## Building and Installation
 
-### Requirements
-- Android SDK 36
+### Prerequisites
+- Android SDK (API 36)
 - Java Development Kit (JDK) 17
 - Android Studio Ladybug or later
 
-### Compiling Debug Build
+### Build Debug APK
 ```bash
 ./gradlew assembleDebug
 ```
 
-The output artifact will be generated at:
+The output binary is located at:
 `app/build/outputs/apk/debug/app-debug.apk`
 
-### Installing via ADB
+### Install to Device via ADB
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
