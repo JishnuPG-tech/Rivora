@@ -10,13 +10,17 @@
 
 ---
 
-## Overview
+## About
 
-Rivora accelerates file transfers by partitioning downloads into parallel segments, routing concurrent streams over both Wi-Fi and Cellular interfaces simultaneously, and writing directly to persistent Android storage with byte-accurate verification and resume capability.
+Rivora is a modern, high-performance download manager for Android and the mobile companion client for the Plexoo ecosystem. It is engineered to solve download throughput bottlenecks on mobile devices by aggregating multiple physical network interfaces simultaneously, enforcing strict link pre-validation, and rendering real-time byte telemetry.
+
+### Early Preview Notice
+
+This is an initial early preview release (v1.0.0). Testing has been performed on single physical mobile hardware. Given the diversity of Android manufacturer implementations, aggressive OEM background process limits, and network-specific carrier restrictions, minor defects or anomalies may be encountered. Constructive feedback, bug reports, and contributions are welcomed via GitHub Issues.
 
 ---
 
-## Architecture and Key Capabilities
+## Key Capabilities
 
 ### Multi-Network Stream Bonding
 Binds network sockets directly to distinct physical and wireless interfaces. Transfers execute concurrently across Wi-Fi and Cellular (4G/5G) data paths to pool combined network bandwidth.
@@ -51,24 +55,33 @@ Provides continuous background operations with status bar progress indicators, r
 
 ---
 
-## Building and Installation
+## Downloads and Releases
+
+Pre-built binaries for both production release and debugging are available on the GitHub Releases page:
+- **Official Release APK (`Rivora-v1.0.0.apk`)**: Optimized binary, zip-aligned and signed for direct installation.
+- **Debuggable APK (`Rivora-v1.0.0-debug.apk`)**: Development binary with full logging and debugging symbols enabled.
+
+---
+
+## Building from Source
 
 ### Prerequisites
 - Android SDK (API 36)
 - Java Development Kit (JDK) 17
 - Android Studio Ladybug or later
 
-### Build Debug APK
+### Build Debug and Release APKs
 ```bash
-./gradlew assembleDebug
+./gradlew assembleRelease assembleDebug
 ```
 
-The output binary is located at:
-`app/build/outputs/apk/debug/app-debug.apk`
+The output binaries are generated at:
+- `app/build/outputs/apk/release/app-release.apk`
+- `app/build/outputs/apk/debug/app-debug.apk`
 
-### Install to Device via ADB
+### Install via ADB
 ```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
 ---
