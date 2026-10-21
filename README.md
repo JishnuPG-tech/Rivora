@@ -5,14 +5,14 @@
 <h1 align="center">Rivora</h1>
 
 <p align="center">
-  Multi-network download manager for Android and mobile client for Plexoo.
+  Multi-network download manager for Android and the official Android version of Plexoo (Plexo).
 </p>
 
 ---
 
 ## About
 
-Rivora is a modern, high-performance download manager for Android and the mobile companion client for the Plexoo ecosystem. It is engineered to solve download throughput bottlenecks on mobile devices by aggregating multiple physical network interfaces simultaneously, enforcing strict link pre-validation, and rendering real-time byte telemetry.
+Rivora is a modern, high-performance download manager and the official Android version of Plexoo (also referred to as Plexo). It is engineered to solve download throughput bottlenecks on mobile devices by aggregating multiple physical network interfaces simultaneously, enforcing strict link pre-validation, and rendering real-time byte telemetry.
 
 ### Early Preview Notice
 
