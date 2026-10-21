@@ -1,4 +1,4 @@
-﻿package com.rivora.backend
+package com.rivora.backend
 
 import android.content.Context
 import android.net.Uri
@@ -141,6 +141,10 @@ class DownloadEngine private constructor(
 
                 if (finalTotalBytes <= 0L || finalFileName == null) {
                     val probe = UrlProber.probe(url)
+                    if (!probe.isDownloadable) {
+                        Log.w("DownloadEngine", "Aborting startDownload: URL is not a downloadable file (${probe.validationWarning ?: probe.errorMessage})")
+                        return@launch
+                    }
                     if (probe.isSuccess) {
                         finalTotalBytes = probe.totalBytes
                         finalFileName = probe.fileName

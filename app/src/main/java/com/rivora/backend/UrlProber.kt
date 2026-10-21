@@ -1,4 +1,4 @@
-﻿package com.rivora.backend
+package com.rivora.backend
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +17,9 @@ data class ProbeResult(
     val fileExtension: String,
     val totalBytes: Long,
     val isResumable: Boolean,
+    val contentType: String? = null,
+    val isDownloadable: Boolean = true,
+    val validationWarning: String? = null,
     val etag: String? = null,
     val lastModified: String? = null,
     val isSuccess: Boolean = true,
@@ -34,9 +37,36 @@ object UrlProber {
 
     private val CONTENT_RANGE_PATTERN = Pattern.compile("""bytes\s+(\d+)-(\d+)/(\d+|\*)""", Pattern.CASE_INSENSITIVE)
 
+    private val DOWNLOADABLE_EXTENSIONS = setOf(
+        // Video / Movies
+        "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg",
+        "ts", "m2ts", "3gp", "vob", "ogv", "rmvb", "asf", "f4v",
+        // Audio / Music
+        "mp3", "flac", "wav", "aac", "ogg", "m4a", "wma", "opus", "alac", "aiff",
+        "mid", "midi", "ape", "mka",
+        // Archives / Compressed / Disk Images
+        "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso", "img", "dmg",
+        "tgz", "tbz2", "cab", "vhd", "vmdk", "z", "lz", "lzma", "cpio",
+        // Executables / Installers / Software
+        "exe", "msi", "apk", "xapk", "apkm", "deb", "rpm", "bin", "jar",
+        "appimage", "pkg", "run", "ipa",
+        // Documents / Books
+        "pdf", "epub", "mobi", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+        "csv", "rtf", "odt", "ods", "odp", "azw3",
+        // Torrents
+        "torrent",
+        // Data & Databases
+        "sql", "db", "sqlite", "sqlite3"
+    )
+
+    private val WEB_PAGE_EXTENSIONS = setOf(
+        "html", "htm", "php", "asp", "aspx", "jsp", "jspx", "cgi", "shtml", "xhtml"
+    )
+
     /**
-     * Probes a remote URL using a lightweight 1KB byte-range request.
-     * Verifies range support, file size, content-disposition, and version tags.
+     * Probes a remote URL using a lightweight byte-range request.
+     * Verifies whether the link represents a valid downloadable file (movie, video, audio, archive, executable, torrent, etc.)
+     * or an HTML web page, checking HTTP headers, content-disposition, MIME types, and file extensions.
      */
     suspend fun probe(url: String): ProbeResult = withContext(Dispatchers.IO) {
         val trimmedUrl = url.trim()
@@ -49,6 +79,22 @@ object UrlProber {
                 fileExtension = name.substringAfterLast('.', "TORRENT").uppercase(),
                 totalBytes = 0L,
                 isResumable = true,
+                contentType = "application/x-bittorrent",
+                isDownloadable = true,
+                isSuccess = true
+            )
+        }
+
+        if (trimmedUrl.startsWith("content://", ignoreCase = true) || trimmedUrl.startsWith("file://", ignoreCase = true)) {
+            val name = fallbackFileNameFromUrl(trimmedUrl)
+            return@withContext ProbeResult(
+                url = trimmedUrl,
+                fileName = name,
+                fileExtension = name.substringAfterLast('.', "TORRENT").uppercase(),
+                totalBytes = 0L,
+                isResumable = true,
+                contentType = "application/x-bittorrent",
+                isDownloadable = true,
                 isSuccess = true
             )
         }
@@ -62,8 +108,9 @@ object UrlProber {
                 fileExtension = "FILE",
                 totalBytes = 0L,
                 isResumable = false,
+                isDownloadable = false,
                 isSuccess = false,
-                errorMessage = "Invalid URL protocol (must be http or https)"
+                errorMessage = "Invalid URL protocol (must start with http://, https://, or magnet:)"
             )
         }
 
@@ -82,7 +129,7 @@ object UrlProber {
                 }
             }
 
-            // 2. Fallback attempt: Standard GET (if server rejects Range header with 400 or 403)
+            // 2. Fallback attempt: Standard GET (if server rejects Range header with 400, 403, or 416)
             val fallbackRequest = Request.Builder()
                 .url(trimmedUrl)
                 .addHeader("User-Agent", "Rivora/1.0 (Android; Mobile)")
@@ -93,14 +140,16 @@ object UrlProber {
                 if (response.isSuccessful) {
                     return@withContext parseResponse(trimmedUrl, response, rangeSent = false)
                 } else {
+                    val errorMsg = formatHttpError(response.code, response.message)
                     return@withContext ProbeResult(
                         url = trimmedUrl,
                         fileName = fallbackFileNameFromUrl(trimmedUrl),
                         fileExtension = "FILE",
                         totalBytes = 0L,
                         isResumable = false,
+                        isDownloadable = false,
                         isSuccess = false,
-                        errorMessage = "HTTP error ${response.code}: ${response.message}"
+                        errorMessage = errorMsg
                     )
                 }
             }
@@ -111,6 +160,7 @@ object UrlProber {
                 fileExtension = "FILE",
                 totalBytes = 0L,
                 isResumable = false,
+                isDownloadable = false,
                 isSuccess = false,
                 errorMessage = e.localizedMessage ?: "Failed to connect to server"
             )
@@ -120,6 +170,7 @@ object UrlProber {
     private fun parseResponse(url: String, response: Response, rangeSent: Boolean): ProbeResult {
         val code = response.code
         val headers = response.headers
+        val finalUrl = response.request.url.toString()
 
         val isResumable = (code == 206) || headers["Accept-Ranges"]?.contains("bytes", ignoreCase = true) == true
         var totalBytes = -1L
@@ -142,23 +193,126 @@ object UrlProber {
             }
         }
 
-        val resolvedFileName = parseContentDisposition(headers["Content-Disposition"])
-            ?: fallbackFileNameFromUrl(response.request.url.toString())
+        val contentDisposition = headers["Content-Disposition"]
+        val hasAttachment = contentDisposition?.contains("attachment", ignoreCase = true) == true
+        val dispositionFileName = parseContentDisposition(contentDisposition)
+        val urlPathFileName = extractUrlPathFileName(finalUrl)
 
-        val extension = resolvedFileName.substringAfterLast('.', "").uppercase().let { ext ->
-            if (ext.isNotBlank() && ext.length <= 5) ext else inferExtension(headers["Content-Type"])
+        val rawContentType = headers["Content-Type"]
+        val cleanContentType = rawContentType?.substringBefore(';')?.trim()?.lowercase() ?: ""
+
+        // Resolve best file name
+        val resolvedFileName = dispositionFileName
+            ?: urlPathFileName
+            ?: generateDefaultFileName(cleanContentType)
+
+        val resolvedExt = resolvedFileName.substringAfterLast('.', "").lowercase()
+        val extensionDisplay = resolvedExt.uppercase().let {
+            if (it.isNotBlank() && it.length <= 6) it else inferExtension(cleanContentType)
+        }
+
+        val isHtmlContentType = cleanContentType == "text/html" ||
+            cleanContentType == "application/xhtml+xml" ||
+            cleanContentType == "text/vnd.wap.wml" ||
+            cleanContentType == "application/vnd.wap.xhtml+xml"
+
+        val isWebPageExt = WEB_PAGE_EXTENSIONS.contains(resolvedExt)
+        val isDownloadableExt = DOWNLOADABLE_EXTENSIONS.contains(resolvedExt)
+        val isDownloadableMime = isDownloadableMimeType(cleanContentType)
+
+        val isDownloadable: Boolean
+        val validationWarning: String?
+
+        when {
+            // 1. Explicit server attachment directive
+            hasAttachment -> {
+                isDownloadable = true
+                validationWarning = null
+            }
+            // 2. Verified downloadable MIME type (video, audio, compressed, executable, APK, PDF, torrent, etc.)
+            isDownloadableMime && !isHtmlContentType -> {
+                isDownloadable = true
+                validationWarning = null
+            }
+            // 3. Known downloadable file extension in URL and not serving HTML
+            isDownloadableExt && !isHtmlContentType -> {
+                isDownloadable = true
+                validationWarning = null
+            }
+            // 4. HTML web page returned
+            isHtmlContentType || isWebPageExt -> {
+                isDownloadable = false
+                validationWarning = if (isDownloadableExt) {
+                    "The server returned an HTML web page instead of the expected .$extensionDisplay file. A login, verification, or web session may be required."
+                } else {
+                    "This URL is an HTML web page, not a downloadable file. Rivora downloads direct files (movies, videos, audio, archives, software, documents, or torrents)."
+                }
+            }
+            // 5. Web text or script files
+            cleanContentType.startsWith("text/") || cleanContentType.contains("javascript") || cleanContentType.contains("css") -> {
+                isDownloadable = false
+                validationWarning = "This URL points to web script or text content ($cleanContentType), not a downloadable file."
+            }
+            // 6. Generic binary stream with positive size (e.g. cloudflare download generator or dynamic binary streams)
+            totalBytes > 0L && (cleanContentType.isBlank() || cleanContentType == "application/octet-stream" || cleanContentType == "application/binary") -> {
+                isDownloadable = true
+                validationWarning = null
+            }
+            else -> {
+                isDownloadable = false
+                validationWarning = "No downloadable file could be verified at this URL. Please verify the link or enter a direct file download URL."
+            }
         }
 
         return ProbeResult(
-            url = response.request.url.toString(),
+            url = finalUrl,
             fileName = resolvedFileName,
-            fileExtension = extension,
+            fileExtension = extensionDisplay,
             totalBytes = totalBytes,
             isResumable = isResumable,
+            contentType = cleanContentType,
+            isDownloadable = isDownloadable,
+            validationWarning = validationWarning,
             etag = headers["ETag"],
             lastModified = headers["Last-Modified"],
             isSuccess = true
         )
+    }
+
+    private fun isDownloadableMimeType(cleanType: String): Boolean {
+        if (cleanType.isBlank()) return false
+        if (cleanType.startsWith("video/")) return true
+        if (cleanType.startsWith("audio/")) return true
+        if (cleanType.startsWith("image/")) return true
+        if (cleanType.startsWith("font/")) return true
+        if (cleanType == "application/octet-stream" ||
+            cleanType == "application/x-binary" ||
+            cleanType == "application/binary" ||
+            cleanType == "binary/octet-stream" ||
+            cleanType == "application/force-download"
+        ) return true
+        if (cleanType == "application/zip" ||
+            cleanType.contains("rar") ||
+            cleanType.contains("7z") ||
+            cleanType.contains("tar") ||
+            cleanType.contains("gzip") ||
+            cleanType.contains("compressed") ||
+            cleanType.contains("iso9660") ||
+            cleanType == "application/x-apple-diskimage"
+        ) return true
+        if (cleanType == "application/vnd.android.package-archive" ||
+            cleanType == "application/x-msdownload" ||
+            cleanType == "application/x-msi" ||
+            cleanType == "application/x-executable"
+        ) return true
+        if (cleanType == "application/pdf" ||
+            cleanType == "application/epub+zip" ||
+            cleanType.contains("msword") ||
+            cleanType.contains("officedocument") ||
+            cleanType.contains("opendocument")
+        ) return true
+        if (cleanType == "application/x-bittorrent") return true
+        return false
     }
 
     private fun parseContentDisposition(header: String?): String? {
@@ -170,7 +324,7 @@ object UrlProber {
         if (match5987 != null) {
             return try {
                 URLDecoder.decode(match5987.groupValues[1], StandardCharsets.UTF_8.name())
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 null
             }
         }
@@ -192,37 +346,91 @@ object UrlProber {
         return null
     }
 
+    private fun extractUrlPathFileName(urlStr: String): String? {
+        return try {
+            val url = urlStr.toHttpUrlOrNull() ?: return null
+            val segments = url.pathSegments
+            if (segments.isEmpty() || (segments.size == 1 && segments[0].isBlank())) return null
+            val last = segments.lastOrNull { it.isNotBlank() } ?: return null
+            val decoded = URLDecoder.decode(last, StandardCharsets.UTF_8.name()).trim()
+            if (decoded.contains('.') && !decoded.endsWith('.')) {
+                decoded
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private fun fallbackFileNameFromUrl(urlStr: String): String {
         return try {
+            if (urlStr.startsWith("content://", ignoreCase = true) || urlStr.startsWith("file://", ignoreCase = true)) {
+                val decoded = URLDecoder.decode(urlStr, StandardCharsets.UTF_8.name())
+                val lastSegment = decoded.substringAfterLast('/').substringAfterLast(':').substringBefore('?')
+                if (lastSegment.contains('.') && !lastSegment.endsWith('.')) {
+                    return lastSegment
+                }
+            }
             val url = urlStr.toHttpUrlOrNull()
-            val segment = url?.pathSegments?.lastOrNull()?.trim()
-            if (!segment.isNullOrBlank()) {
+            val segment = url?.pathSegments?.lastOrNull { it.isNotBlank() }?.trim()
+            if (!segment.isNullOrBlank() && segment.contains('.')) {
                 URLDecoder.decode(segment, StandardCharsets.UTF_8.name())
             } else {
-                "download.bin"
+                "download_${System.currentTimeMillis()}.bin"
             }
-        } catch (e: Exception) {
-            "download.bin"
+        } catch (_: Exception) {
+            "download_${System.currentTimeMillis()}.bin"
         }
+    }
+
+    private fun generateDefaultFileName(contentType: String): String {
+        val ext = inferExtension(contentType).lowercase()
+        val suffix = if (ext == "file") "bin" else ext
+        return "download_${System.currentTimeMillis()}.$suffix"
     }
 
     private fun inferExtension(contentType: String?): String {
         if (contentType.isNullOrBlank()) return "FILE"
         val cleanType = contentType.substringBefore(';').trim().lowercase()
-        return when (cleanType) {
-            "video/x-matroska" -> "MKV"
-            "video/mp4" -> "MP4"
-            "video/quicktime" -> "MOV"
-            "video/x-msvideo" -> "AVI"
-            "application/zip" -> "ZIP"
-            "application/x-rar-compressed", "application/vnd.rar" -> "RAR"
-            "application/x-7z-compressed" -> "7Z"
-            "application/x-iso9660-image" -> "ISO"
-            "application/pdf" -> "PDF"
-            "application/vnd.android.package-archive" -> "APK"
-            "audio/mpeg" -> "MP3"
-            "audio/flac" -> "FLAC"
+        return when {
+            cleanType == "video/x-matroska" -> "MKV"
+            cleanType == "video/mp4" -> "MP4"
+            cleanType == "video/quicktime" -> "MOV"
+            cleanType == "video/x-msvideo" -> "AVI"
+            cleanType == "video/webm" -> "WEBM"
+            cleanType.startsWith("video/") -> cleanType.substringAfter("video/").uppercase()
+            cleanType == "audio/mpeg" -> "MP3"
+            cleanType == "audio/flac" -> "FLAC"
+            cleanType == "audio/wav" || cleanType == "audio/x-wav" -> "WAV"
+            cleanType == "audio/ogg" -> "OGG"
+            cleanType == "audio/aac" -> "AAC"
+            cleanType.startsWith("audio/") -> cleanType.substringAfter("audio/").uppercase()
+            cleanType == "application/zip" -> "ZIP"
+            cleanType.contains("rar") -> "RAR"
+            cleanType.contains("7z") -> "7Z"
+            cleanType.contains("tar") -> "TAR"
+            cleanType.contains("gzip") -> "GZ"
+            cleanType.contains("iso9660") -> "ISO"
+            cleanType == "application/x-apple-diskimage" -> "DMG"
+            cleanType == "application/pdf" -> "PDF"
+            cleanType == "application/vnd.android.package-archive" -> "APK"
+            cleanType == "application/x-msdownload" || cleanType == "application/x-executable" -> "EXE"
+            cleanType == "application/x-msi" -> "MSI"
+            cleanType == "application/x-bittorrent" -> "TORRENT"
+            cleanType.startsWith("image/") -> cleanType.substringAfter("image/").uppercase()
             else -> "FILE"
+        }
+    }
+
+    private fun formatHttpError(code: Int, message: String): String {
+        return when (code) {
+            404 -> "File not found on server (HTTP 404)"
+            403 -> "Access forbidden by server (HTTP 403)"
+            401 -> "Authorization required to access this file (HTTP 401)"
+            410 -> "File has been removed from server (HTTP 410)"
+            in 500..599 -> "Server error occurred (HTTP $code)"
+            else -> "HTTP $code: ${message.ifBlank { "Request failed" }}"
         }
     }
 
@@ -232,7 +440,7 @@ object UrlProber {
         if (match != null) {
             return try {
                 URLDecoder.decode(match.groupValues[1], StandardCharsets.UTF_8.name())
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 match.groupValues[1]
             }
         }

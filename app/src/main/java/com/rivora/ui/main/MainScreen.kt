@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.main
+package com.rivora.ui.main
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -298,8 +298,9 @@ fun MainScreen(
   when (state.activeModal) {
     "newdl" -> NewDownloadDialog(
       onDismiss = { viewModel.closeModal() },
-      onStartDownload = {
+      onStartDownload = { url, fileName, totalBytes, isResumable, customTreeUri, displayPath ->
         viewModel.closeModal()
+        viewModel.startDownload(url, fileName, totalBytes, isResumable, customTreeUri, displayPath)
         viewModel.switchView("detail")
         viewModel.selectTab(0)
       },

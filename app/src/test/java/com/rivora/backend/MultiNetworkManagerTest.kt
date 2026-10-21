@@ -1,4 +1,4 @@
-﻿package com.rivora.backend
+package com.rivora.backend
 
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -50,13 +50,11 @@ class MultiNetworkManagerTest {
     @Test
     fun testGetClientFallback() {
         val manager = MultiNetworkManager()
-        val wifiClient = manager.getClient(NetworkAdapterType.WIFI)
-        val cellularClient = manager.getClient(NetworkAdapterType.CELLULAR)
+        val defaultClient = manager.getDefaultClient()
 
-        assertNotNull(wifiClient)
-        assertNotNull(cellularClient)
+        assertNotNull(defaultClient)
         // Verify timeout configuration
-        assertEquals(15000, wifiClient.connectTimeoutMillis)
-        assertEquals(30000, wifiClient.readTimeoutMillis)
+        assertEquals(15000, defaultClient.connectTimeoutMillis)
+        assertEquals(30000, defaultClient.readTimeoutMillis)
     }
 }

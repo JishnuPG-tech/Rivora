@@ -1,5 +1,6 @@
 package com.rivora.ui.screens
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -13,13 +14,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -32,12 +36,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.rivora.backend.UrlProber
 import com.rivora.theme.RivoraColor
 import com.rivora.theme.RivoraType
+import com.rivora.ui.components.FileTile
 import com.rivora.ui.components.LargeProgressBar
 import com.rivora.ui.components.NetworkDot
 import com.rivora.ui.components.RivoraButton
@@ -45,6 +52,7 @@ import com.rivora.ui.components.RivoraButtonVariant
 import com.rivora.ui.components.RivoraCard
 import com.rivora.ui.components.RivoraInsetBox
 import com.rivora.ui.components.RivoraSwitch
+import com.rivora.util.ByteFormatter
 
 /**
  * New Download Modal Dialog matching Screenshot 3 & UI Kit Section 9.
@@ -54,18 +62,24 @@ import com.rivora.ui.components.RivoraSwitch
 @Composable
 fun NewDownloadDialog(
   onDismiss: () -> Unit,
-  onStartDownload: () -> Unit,
+  onStartDownload: (url: String, fileName: String, totalBytes: Long, isResumable: Boolean, customTreeUri: Uri?, displayPath: String) -> Unit,
   isWifiConnected: Boolean = false,
   isCellularConnected: Boolean = true
 ) {
-  var urlInput by remember { mutableStateOf("https://releases.ubuntu.com/24.04/ubuntu-24.04-desktop-amd64.iso") }
+  var urlInput by remember { mutableStateOf("") }
   var savePath by remember { mutableStateOf("Downloads/") }
+  var selectedFolderUri by remember { mutableStateOf<Uri?>(null) }
+  var isChecking by remember { mutableStateOf(false) }
+  var detectedFile by remember { mutableStateOf<DetectedFileInfo?>(null) }
+  var probeError by remember { mutableStateOf<String?>(null) }
+  var validationWarning by remember { mutableStateOf<String?>(null) }
 
   // Folder picker contract
   val folderPickerLauncher = rememberLauncherForActivityResult(
     contract = ActivityResultContracts.OpenDocumentTree()
   ) { uri ->
     uri?.let {
+      selectedFolderUri = it
       val path = it.path ?: ""
       val friendlyName = when {
         path.contains("primary:") -> path.substringAfter("primary:") + "/"
@@ -82,6 +96,53 @@ fun NewDownloadDialog(
   ) { uri ->
     uri?.let {
       urlInput = it.toString()
+    }
+  }
+
+  // Live URL prober & validator
+  LaunchedEffect(urlInput) {
+    val trimmed = urlInput.trim()
+    if (trimmed.isNotBlank()) {
+      isChecking = true
+      detectedFile = null
+      probeError = null
+      validationWarning = null
+
+      val probe = UrlProber.probe(trimmed)
+      isChecking = false
+
+      if (!probe.isSuccess) {
+        detectedFile = null
+        probeError = probe.errorMessage ?: "Link is unreachable or invalid"
+        validationWarning = null
+      } else if (!probe.isDownloadable) {
+        detectedFile = null
+        probeError = null
+        validationWarning = probe.validationWarning ?: "This link points to an HTML web page rather than a downloadable file."
+      } else {
+        probeError = null
+        validationWarning = null
+        val sizeFormatted = if (probe.totalBytes > 0L) {
+          ByteFormatter.formatBytes(probe.totalBytes)
+        } else if (trimmed.startsWith("magnet:", ignoreCase = true) || probe.fileExtension == "TORRENT") {
+          "Torrent"
+        } else {
+          "Stream"
+        }
+        detectedFile = DetectedFileInfo(
+          name = probe.fileName,
+          size = sizeFormatted,
+          ext = probe.fileExtension,
+          tag = if (probe.isResumable) "resumable · multi-stream" else "single-stream",
+          totalBytes = probe.totalBytes,
+          isResumable = probe.isResumable
+        )
+      }
+    } else {
+      isChecking = false
+      detectedFile = null
+      probeError = null
+      validationWarning = null
     }
   }
 
@@ -122,7 +183,7 @@ fun NewDownloadDialog(
         // 2. Main Content
         Column(
           modifier = Modifier.padding(20.dp),
-          verticalArrangement = Arrangement.spacedBy(16.dp)
+          verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
           // Spacious 56dp Input Bar with Inset Surface
           Box(
@@ -163,6 +224,115 @@ fun NewDownloadDialog(
             )
           }
 
+          // Validation & Detection Feedback Card
+          when {
+            isChecking -> {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFF1B1B1E))
+                  .border(1.dp, Color(0xFF2A2A30), RoundedCornerShape(10.dp))
+                  .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFE5A044))
+                )
+                Text(
+                  text = "Checking link and verifying downloadable file...",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 16f).copy(
+                    color = Color(0xFFA1A1A8)
+                  )
+                )
+              }
+            }
+            probeError != null -> {
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFF231416))
+                  .border(1.dp, Color(0xFF5E2226), RoundedCornerShape(10.dp))
+                  .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+              ) {
+                Text(
+                  text = "Unreachable Download Link",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.SemiBold, 0f, 16f).copy(
+                    color = Color(0xFFF87171)
+                  )
+                )
+                Text(
+                  text = probeError ?: "Unable to establish connection to download server.",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 11.5f, FontWeight.Normal, 0f, 15f).copy(
+                    color = Color(0xFFE2A0A4)
+                  )
+                )
+              }
+            }
+            validationWarning != null -> {
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFF241C12))
+                  .border(1.dp, Color(0xFF5E431E), RoundedCornerShape(10.dp))
+                  .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+              ) {
+                Text(
+                  text = "Web Page Detected",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.SemiBold, 0f, 16f).copy(
+                    color = Color(0xFFFBBF24)
+                  )
+                )
+                Text(
+                  text = validationWarning ?: "This link points to an HTML web page rather than a downloadable file.",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 11.5f, FontWeight.Normal, 0f, 15f).copy(
+                    color = Color(0xFFD4C19C)
+                  )
+                )
+              }
+            }
+            detectedFile != null -> {
+              val file = detectedFile!!
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(10.dp))
+                  .background(Color(0xFF161619))
+                  .border(1.dp, Color(0x2238BDF8), RoundedCornerShape(10.dp))
+                  .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+              ) {
+                FileTile(extension = file.ext, color = Color(0xFFC0C0CC))
+                Column(modifier = Modifier.weight(1f)) {
+                  Text(
+                    text = file.name,
+                    style = RivoraType.rivoraText(RivoraType.Sans, 13f, FontWeight.SemiBold, 0f, 17f).copy(
+                      color = Color(0xFFEDEDEF)
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                  )
+                  Spacer(modifier = Modifier.height(2.dp))
+                  Text(
+                    text = "${file.size} · ${file.tag}",
+                    style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Normal, 0f, 14f).copy(
+                      color = Color(0xFFA1A1A8)
+                    )
+                  )
+                }
+              }
+            }
+          }
+
           // Options Row (Open Torrent)
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -192,7 +362,7 @@ fun NewDownloadDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
                 Text(
-                  text = "📁 $savePath",
+                  text = savePath,
                   style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Medium, 0f, 16f).copy(color = RivoraColor.TextPrimary)
                 )
                 RivoraButton(
@@ -259,6 +429,7 @@ fun NewDownloadDialog(
         }
 
         // 3. Action Footer
+        val isDownloadReady = (detectedFile != null) && !isChecking && probeError == null && validationWarning == null
         Row(
           modifier = Modifier
             .fillMaxWidth()
@@ -276,9 +447,12 @@ fun NewDownloadDialog(
           )
           Spacer(modifier = Modifier.width(10.dp))
           RivoraButton(
-            text = "Add Download",
-            onClick = onStartDownload,
-            variant = RivoraButtonVariant.AMBER,
+            text = if (isChecking) "Checking..." else "Add Download",
+            onClick = {
+              val file = detectedFile ?: return@RivoraButton
+              onStartDownload(urlInput.trim(), file.name, file.totalBytes, file.isResumable, selectedFolderUri, savePath)
+            },
+            variant = if (isDownloadReady) RivoraButtonVariant.AMBER else RivoraButtonVariant.DARK,
             height = 38.dp
           )
         }

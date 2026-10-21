@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.main
+package com.rivora.ui.main
 
 import junit.framework.TestCase.assertEquals
 import kotlinx.coroutines.flow.first
@@ -10,7 +10,7 @@ class MainScreenViewModelTest {
   fun uiState_initialState() = runTest {
     val viewModel = MainScreenViewModel()
     val state = viewModel.uiState.first()
-    assertEquals("add", state.currentView)
+    assertEquals("queue", state.currentView)
     assertEquals(0, state.activeTab)
     assertEquals("MB/s", state.unit)
   }

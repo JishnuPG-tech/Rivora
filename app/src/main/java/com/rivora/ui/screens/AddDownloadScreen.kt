@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.screens
+package com.rivora.ui.screens
 
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -79,6 +79,7 @@ fun AddDownloadScreen(
   var isChecking by remember { mutableStateOf(false) }
   var detectedFile by remember { mutableStateOf<DetectedFileInfo?>(null) }
   var probeError by remember { mutableStateOf<String?>(null) }
+  var validationWarning by remember { mutableStateOf<String?>(null) }
   var savePath by remember { mutableStateOf("Downloads/") }
   var selectedFolderUri by remember { mutableStateOf<Uri?>(null) }
   var selectedTorrentName by remember { mutableStateOf<String?>(null) }
@@ -139,38 +140,44 @@ fun AddDownloadScreen(
       isChecking = true
       detectedFile = null
       probeError = null
+      validationWarning = null
       
       // Probe using real backend UrlProber
       val probe = com.rivora.backend.UrlProber.probe(trimmed)
       isChecking = false
 
-      if (probe.isSuccess && probe.totalBytes > 0L) {
-        val sizeFormatted = ByteFormatter.formatBytes(probe.totalBytes)
+      if (!probe.isSuccess) {
+        detectedFile = null
+        probeError = probe.errorMessage ?: "Link is unreachable or invalid"
+        validationWarning = null
+      } else if (!probe.isDownloadable) {
+        detectedFile = null
+        probeError = null
+        validationWarning = probe.validationWarning ?: "This link points to an HTML web page rather than a downloadable file."
+      } else {
+        probeError = null
+        validationWarning = null
+        val sizeFormatted = if (probe.totalBytes > 0L) {
+          ByteFormatter.formatBytes(probe.totalBytes)
+        } else if (trimmed.startsWith("magnet:", ignoreCase = true) || probe.fileExtension == "TORRENT") {
+          "Torrent"
+        } else {
+          "Stream"
+        }
         detectedFile = DetectedFileInfo(
           name = probe.fileName,
           size = sizeFormatted,
           ext = probe.fileExtension,
-          tag = if (probe.isResumable) "resumable" else "single-stream",
+          tag = if (probe.isResumable) "resumable · multi-stream" else "single-stream",
           totalBytes = probe.totalBytes,
           isResumable = probe.isResumable
         )
-      } else if (probe.isSuccess) {
-        detectedFile = DetectedFileInfo(
-          name = probe.fileName,
-          size = "Stream",
-          ext = probe.fileExtension,
-          tag = "live-stream",
-          totalBytes = 0L,
-          isResumable = false
-        )
-      } else {
-        detectedFile = null
-        probeError = probe.errorMessage ?: "Link is unreachable or invalid"
       }
     } else {
       isChecking = false
       detectedFile = null
       probeError = null
+      validationWarning = null
     }
   }
 
@@ -312,55 +319,158 @@ fun AddDownloadScreen(
           }
         }
 
-        // Checking State or Detected File State or Error State
+        // Feedback Area: Checking | Error | Warning | Verified File
         if (isChecking) {
-          Spacer(modifier = Modifier.height(6.dp))
-          Text(
-            text = "Checking the link...",
-            style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Normal, 0f, 16f).copy(
-              color = Color(0xFF8C8C94)
-            )
-          )
-        } else if (probeError != null) {
-          Spacer(modifier = Modifier.height(6.dp))
-          Text(
-            text = probeError!!,
-            style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Normal, 0f, 16f).copy(
-              color = Color(0xFFFF6B6B)
-            ),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-          )
-        } else if (detectedFile != null) {
-          val file = detectedFile!!
-          Spacer(modifier = Modifier.height(8.dp))
-
-          // Detected File Card matching Screenshot 2
           Row(
             modifier = Modifier
               .fillMaxWidth()
-              .clip(RoundedCornerShape(10.dp))
-              .background(Color(0xFF161619))
-              .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(10.dp))
-              .padding(10.dp),
+              .padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            FileTile(extension = file.ext, color = Color(0xFFC0C0CC))
-            Column(modifier = Modifier.weight(1f)) {
-              Text(
-                text = file.name,
-                style = RivoraType.rivoraText(RivoraType.Sans, 13.5f, FontWeight.SemiBold, 0f, 18f).copy(
-                  color = Color(0xFFEDEDEF)
-                ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+            Box(
+              modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(RivoraColor.Orange)
+            )
+            Text(
+              text = "Checking link and verifying downloadable file...",
+              style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Medium, 0f, 16f).copy(
+                color = Color(0xFFA1A1A8)
               )
-              Spacer(modifier = Modifier.height(2.dp))
+            )
+          }
+        } else if (probeError != null) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 10.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF221214))
+              .border(1.dp, Color(0xFF6B2528), RoundedCornerShape(10.dp))
+              .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFFFF5252))
+              )
               Text(
-                text = "${file.size} · ${file.tag}",
-                style = RivoraType.rivoraText(RivoraType.Mono, 11.5f, FontWeight.Normal, 0f, 15f).copy(
-                  color = Color(0xFFA1A1A8)
+                text = "INVALID DOWNLOAD LINK",
+                style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.SemiBold, 0.4f, 14f).copy(
+                  color = Color(0xFFFF7070)
+                )
+              )
+            }
+            Text(
+              text = probeError!!,
+              style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 17f).copy(
+                color = Color(0xFFE2C4C4)
+              )
+            )
+          }
+        } else if (validationWarning != null) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 10.dp)
+              .clip(RoundedCornerShape(10.dp))
+              .background(Color(0xFF221A10))
+              .border(1.dp, Color(0xFF7A4E1A), RoundedCornerShape(10.dp))
+              .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+          ) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFFFFB74D))
+              )
+              Text(
+                text = "NON-DOWNLOADABLE LINK",
+                style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.SemiBold, 0.4f, 14f).copy(
+                  color = Color(0xFFFFB74D)
+                )
+              )
+            }
+            Text(
+              text = validationWarning!!,
+              style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 17f).copy(
+                color = Color(0xFFE0D0BC)
+              )
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+              text = "Direct downloadable links typically end in .mp4, .mkv, .zip, .exe, .apk, .pdf, or a magnet link.",
+              style = RivoraType.rivoraText(RivoraType.Mono, 10.5f, FontWeight.Normal, 0f, 14f).copy(
+                color = Color(0xFFA89884)
+              )
+            )
+          }
+        } else if (detectedFile != null) {
+          val file = detectedFile!!
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF161619))
+                .border(1.dp, Color(0x2238BDF8), RoundedCornerShape(10.dp))
+                .padding(10.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+              FileTile(extension = file.ext, color = Color(0xFFC0C0CC))
+              Column(modifier = Modifier.weight(1f)) {
+                Text(
+                  text = file.name,
+                  style = RivoraType.rivoraText(RivoraType.Sans, 13.5f, FontWeight.SemiBold, 0f, 18f).copy(
+                    color = Color(0xFFEDEDEF)
+                  ),
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                  text = "${file.size} · ${file.tag}",
+                  style = RivoraType.rivoraText(RivoraType.Mono, 11.5f, FontWeight.Normal, 0f, 15f).copy(
+                    color = Color(0xFFA1A1A8)
+                  )
+                )
+              }
+            }
+
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(6.dp),
+              modifier = Modifier.padding(start = 4.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(Color(0xFF4ADE80))
+              )
+              Text(
+                text = "Downloadable file verified",
+                style = RivoraType.rivoraText(RivoraType.Mono, 10.5f, FontWeight.Medium, 0f, 14f).copy(
+                  color = Color(0xFF4ADE80)
                 )
               )
             }
@@ -528,30 +638,29 @@ fun AddDownloadScreen(
               modifier = Modifier
                 .height(36.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFF8E652C))
+                .background(Color(0xFF382C18))
+                .border(1.dp, Color(0xFF6B481B), RoundedCornerShape(8.dp))
                 .padding(horizontal = 16.dp),
               contentAlignment = Alignment.Center
             ) {
               Text(
-                text = "Checking",
+                text = "Checking...",
                 style = RivoraType.rivoraText(RivoraType.Sans, 14f, FontWeight.SemiBold, 0f, 18f).copy(
-                  color = Color(0xFF2D2010)
+                  color = Color(0xFFE5A044)
                 )
               )
             }
           } else {
-            val isEnabled = urlInput.isNotBlank()
+            val isDownloadReady = (detectedFile != null) && !isChecking && probeError == null && validationWarning == null
             Box(
               modifier = Modifier
                 .height(36.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (isEnabled) Color(0xFFE5A044) else Color(0x33E5A044))
-                .clickable(enabled = isEnabled) {
-                  val file = detectedFile
-                  val name = file?.name ?: urlInput.substringAfterLast('/').substringBefore('?').ifBlank { "download.bin" }
-                  val bytes = file?.totalBytes ?: 0L
-                  val resumable = file?.isResumable ?: false
-                  onStartDownload(urlInput.trim(), name, bytes, resumable, selectedFolderUri, savePath)
+                .background(if (isDownloadReady) Color(0xFFE5A044) else Color(0x1AFFFFFF))
+                .border(1.dp, if (isDownloadReady) Color(0xFFE5A044) else Color(0x22FFFFFF), RoundedCornerShape(8.dp))
+                .clickable(enabled = isDownloadReady) {
+                  val file = detectedFile ?: return@clickable
+                  onStartDownload(urlInput.trim(), file.name, file.totalBytes, file.isResumable, selectedFolderUri, savePath)
                 }
                 .padding(horizontal = 18.dp),
               contentAlignment = Alignment.Center
@@ -559,7 +668,7 @@ fun AddDownloadScreen(
               Text(
                 text = "Download",
                 style = RivoraType.rivoraText(RivoraType.Sans, 14f, FontWeight.SemiBold, 0f, 18f).copy(
-                  color = if (isEnabled) Color(0xFF17171A) else Color(0x66FFFFFF)
+                  color = if (isDownloadReady) Color(0xFF17171A) else Color(0x55FFFFFF)
                 )
               )
             }
