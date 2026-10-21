@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.screens
+package com.rivora.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -42,6 +42,8 @@ fun ThroughputTab(
   unitText: String,
   wifiSpeedText: String,
   cellularSpeedText: String,
+  wifiSpeedMBps: Float = 0f,
+  cellularSpeedMBps: Float = 0f,
   cellularActive: Boolean,
   avgSpeedText: String,
   peakSpeedText: String,
@@ -58,8 +60,8 @@ fun ThroughputTab(
   val isCellActive = isCellularConnected && cellularActive
   val isDual = isWifiConnected && isCellActive
 
-  val wifiSpd = if (isWifiConnected) (wifiSpeedText.toFloatOrNull() ?: 0f) else 0f
-  val cellSpd = if (isCellActive) (cellularSpeedText.toFloatOrNull() ?: 0f) else 0f
+  val wifiSpd = if (isWifiConnected) wifiSpeedMBps else 0f
+  val cellSpd = if (isCellActive) cellularSpeedMBps else 0f
   val totalSpd = wifiSpd + cellSpd
 
   val wifiRatio: Float
@@ -148,7 +150,7 @@ fun ThroughputTab(
                 style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Normal, 0f, 14f).copy(color = RivoraColor.TextSecondary)
               )
               Text(
-                text = "$wifiSpeedText $unitText",
+                text = wifiSpeedText,
                 style = RivoraType.rivoraText(RivoraType.Mono, 11.5f, FontWeight.SemiBold, 0f, 15f).copy(color = RivoraColor.Orange)
               )
             }
@@ -165,7 +167,7 @@ fun ThroughputTab(
                 style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Normal, 0f, 14f).copy(color = RivoraColor.TextSecondary)
               )
               Text(
-                text = "$cellularSpeedText $unitText",
+                text = cellularSpeedText,
                 style = RivoraType.rivoraText(RivoraType.Mono, 11.5f, FontWeight.SemiBold, 0f, 15f).copy(color = RivoraColor.TextPrimary)
               )
             }
@@ -209,13 +211,13 @@ fun ThroughputTab(
         )
         MiniStatBox(
           label = "AVERAGE",
-          value = "$avgSpeedText $unitText",
+          value = avgSpeedText,
           valueColor = RivoraColor.White,
           modifier = Modifier.weight(1f)
         )
         MiniStatBox(
           label = "PEAK (60S)",
-          value = "$peakSpeedText $unitText",
+          value = peakSpeedText,
           valueColor = RivoraColor.White,
           modifier = Modifier.weight(1f)
         )
@@ -245,7 +247,7 @@ fun ThroughputTab(
           dotColor = RivoraColor.Orange,
           name = "Wi-Fi",
           interfaceInfo = "$wifiInterface · ${if (wifiStreams > 0) "$wifiStreams streams" else "idle"}",
-          speedText = "$wifiSpeedText $unitText",
+          speedText = wifiSpeedText,
           sharePercentText = "$wifiSharePercent%",
           shareRatio = wifiRatio,
           barColor = RivoraColor.Orange
@@ -261,7 +263,7 @@ fun ThroughputTab(
             cellularActive -> "$cellularInterface · ${if (cellularStreams > 0) "$cellularStreams streams" else "active"}"
             else -> "$cellularInterface · disabled"
           },
-          speedText = if (cellularActive) "$cellularSpeedText $unitText" else "0.0 $unitText",
+          speedText = if (cellularActive) cellularSpeedText else "0.0 $unitText",
           sharePercentText = if (cellularActive) "$cellSharePercent%" else "0%",
           shareRatio = if (cellularActive) cellRatio else 0f,
           barColor = if (cellularActive) RivoraColor.StreamSecondary else RivoraColor.TextDisabled

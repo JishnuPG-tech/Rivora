@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.screens
+package com.rivora.ui.screens
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -61,6 +61,8 @@ fun OverviewTab(
   peakSpeedText: String,
   wifiSpeedText: String,
   cellularSpeedText: String,
+  wifiSpeedMBps: Float = 0f,
+  cellularSpeedMBps: Float = 0f,
   cellularActive: Boolean,
   completedChunks: Int,
   totalChunks: Int,
@@ -86,8 +88,8 @@ fun OverviewTab(
   val isCellActive = isCellularConnected && cellularActive
   val isDual = isWifiConnected && isCellActive
 
-  val wifiSpd = if (isWifiConnected) (wifiSpeedText.toFloatOrNull() ?: 0f) else 0f
-  val cellSpd = if (isCellActive) (cellularSpeedText.toFloatOrNull() ?: 0f) else 0f
+  val wifiSpd = if (isWifiConnected) wifiSpeedMBps else 0f
+  val cellSpd = if (isCellActive) cellularSpeedMBps else 0f
   val totalSpd = wifiSpd + cellSpd
 
   val targetWifiRatio: Float
@@ -152,8 +154,8 @@ fun OverviewTab(
         verticalAlignment = Alignment.CenterVertically
       ) {
         SpeedMergerCanvas(
-          wifiSpeedText = "$wifiSpeedText $unitText",
-          cellularSpeedText = "$cellularSpeedText $unitText",
+          wifiSpeedText = wifiSpeedText,
+          cellularSpeedText = cellularSpeedText,
           isWifiConnected = isWifiConnected,
           isCellularConnected = isCellularConnected,
           cellularActive = cellularActive,
@@ -452,7 +454,7 @@ fun OverviewTab(
               horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
               Text(
-                text = "$wifiSpeedText $unitText",
+                text = wifiSpeedText,
                 style = RivoraType.rivoraText(RivoraType.Mono, 13f, FontWeight.Bold, 0f, 16f).copy(
                   color = RivoraColor.Orange
                 )
@@ -533,7 +535,7 @@ fun OverviewTab(
               horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
               Text(
-                text = if (cellularActive) "$cellularSpeedText $unitText" else "0.0 $unitText",
+                text = if (cellularActive) cellularSpeedText else "0.0 $unitText",
                 style = RivoraType.rivoraText(RivoraType.Mono, 13f, FontWeight.Bold, 0f, 16f).copy(
                   color = if (cellularActive) RivoraColor.TextPrimary else RivoraColor.TextMuted
                 )

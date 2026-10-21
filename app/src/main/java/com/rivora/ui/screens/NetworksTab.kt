@@ -43,6 +43,10 @@ fun NetworksTab(
   currentSpeedText: String,
   wifiSpeedText: String,
   cellularSpeedText: String,
+  wifiUnitText: String = "MB/s",
+  cellularUnitText: String = "MB/s",
+  wifiSpeedMBps: Float = 0f,
+  cellularSpeedMBps: Float = 0f,
   cellularActive: Boolean,
   unitText: String,
   wifiStreams: Int,
@@ -59,8 +63,8 @@ fun NetworksTab(
   val isCellActive = isCellularConnected && cellularActive
   val isDual = isWifiConnected && isCellActive
 
-  val wifiSpd = if (isWifiConnected) (wifiSpeedText.toFloatOrNull() ?: 0f) else 0f
-  val cellSpd = if (isCellActive) (cellularSpeedText.toFloatOrNull() ?: 0f) else 0f
+  val wifiSpd = if (isWifiConnected) wifiSpeedMBps else 0f
+  val cellSpd = if (isCellActive) cellularSpeedMBps else 0f
   val totalSpd = wifiSpd + cellSpd
 
   val wifiRatio: Float
@@ -133,7 +137,7 @@ fun NetworksTab(
           title = "Wi-Fi",
           subtitle = "$wifiInterface · ${if (wifiStreams > 0) "$wifiStreams streams" else "active"}",
           valueText = wifiSpeedText,
-          unitText = unitText,
+          unitText = wifiUnitText,
           isChecked = true,
           onToggle = {},
           enabled = true,
@@ -151,7 +155,7 @@ fun NetworksTab(
             else -> "$cellularInterface · disabled"
           },
           valueText = if (cellularActive) cellularSpeedText else "0.0",
-          unitText = if (cellularActive) unitText else "",
+          unitText = if (cellularActive) cellularUnitText else "",
           isChecked = cellularActive,
           onToggle = onToggleCellular,
           enabled = true,

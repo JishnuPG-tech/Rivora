@@ -48,6 +48,7 @@ import com.rivora.ui.screens.NetworksTab
 import com.rivora.ui.screens.NewDownloadDialog
 import com.rivora.ui.screens.OverviewTab
 import com.rivora.ui.screens.QueueScreen
+import com.rivora.util.ByteFormatter
 import com.rivora.ui.screens.ThroughputTab
 
 /**
@@ -62,16 +63,25 @@ fun MainScreen(
 ) {
   val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-  val mult = if (state.unit == "Mbps") 8f else 1f
   val totalSpeed = if (state.isPaused) 0f else (state.wifiSpeedMBps + state.cellularSpeedMBps)
-  val displayTotal = String.format("%.1f", totalSpeed * mult)
-  val displayWifi = String.format("%.1f", state.wifiSpeedMBps * mult)
-  val displayCell = String.format("%.1f", state.cellularSpeedMBps * mult)
+  val formattedTotal = ByteFormatter.formatSpeed(totalSpeed, state.unit)
+  val formattedWifi = ByteFormatter.formatSpeed(state.wifiSpeedMBps, state.unit)
+  val formattedCell = ByteFormatter.formatSpeed(state.cellularSpeedMBps, state.unit)
 
-  val avgSpeed = (state.throughputHistory.average().toFloat() * mult)
-  val peakSpeed = ((state.throughputHistory.maxOrNull() ?: 2.4f) * mult)
-  val displayAvg = String.format("%.1f", avgSpeed)
-  val displayPeak = String.format("%.1f", peakSpeed)
+  val avgSpeed = state.throughputHistory.average().toFloat()
+  val peakSpeed = state.throughputHistory.maxOrNull() ?: 2.4f
+  val formattedAvg = ByteFormatter.formatSpeed(avgSpeed, state.unit)
+  val formattedPeak = ByteFormatter.formatSpeed(peakSpeed, state.unit)
+
+  val displayTotal = formattedTotal.value
+  val currentUnitText = formattedTotal.unit
+  val displayWifi = formattedWifi.text
+  val displayCell = formattedCell.text
+  val displayAvg = formattedAvg.text
+  val displayPeak = formattedPeak.text
+  val etaDisplay = ByteFormatter.formatEta(state.etaSeconds)
+
+  val mult = if (state.unit == "Mbps") 8f else 1f
 
   val downloadedGB = (state.activeItem?.downloadedBytes ?: 0L) / (1024f * 1024f * 1024f)
   val progressPercent = if ((state.activeItem?.totalBytes ?: 0L) > 0L) {
@@ -104,9 +114,10 @@ fun MainScreen(
           queue = state.queue,
           finished = state.finished,
           currentSpeedText = displayTotal,
-          unitText = state.unit,
+          unitText = currentUnitText,
           cellularActive = state.isCellularActive,
           isPaused = state.isPaused,
+          etaText = etaDisplay,
           onOpenDetail = { item ->
             viewModel.switchView("detail")
             viewModel.selectTab(0)
@@ -175,17 +186,19 @@ fun MainScreen(
                 downloadedBytes = state.activeItem?.downloadedBytes ?: 0L,
                 totalBytes = state.activeItem?.totalBytes ?: 0L,
                 currentSpeedText = displayTotal,
-                unitText = state.unit,
+                unitText = currentUnitText,
                 avgSpeedText = displayAvg,
                 peakSpeedText = displayPeak,
                 wifiSpeedText = displayWifi,
                 cellularSpeedText = displayCell,
+                wifiSpeedMBps = state.wifiSpeedMBps,
+                cellularSpeedMBps = state.cellularSpeedMBps,
                 cellularActive = state.isCellularActive,
                 completedChunks = state.completedChunks,
                 totalChunks = state.totalChunks,
                 wifiStreams = state.wifiStreams,
                 isPaused = state.isPaused,
-                etaText = if (state.etaSeconds > 0) "${state.etaSeconds}s left" else "Calculating...",
+                etaText = etaDisplay,
                 history = state.throughputHistory.map { it * mult },
                 onCancel = { viewModel.cancelDownload() },
                 onTogglePause = { viewModel.togglePause() },
@@ -201,14 +214,16 @@ fun MainScreen(
               )
               1 -> ThroughputTab(
                 currentSpeedText = displayTotal,
-                unitText = state.unit,
+                unitText = currentUnitText,
                 wifiSpeedText = displayWifi,
                 cellularSpeedText = displayCell,
+                wifiSpeedMBps = state.wifiSpeedMBps,
+                cellularSpeedMBps = state.cellularSpeedMBps,
                 cellularActive = state.isCellularActive,
                 avgSpeedText = displayAvg,
                 peakSpeedText = displayPeak,
                 history = state.throughputHistory.map { it * mult },
-                maxAxisValue = maxOf(peakSpeed * 1.15f, 10f),
+                maxAxisValue = maxOf(peakSpeed * mult * 1.15f, 10f),
                 wifiStreams = state.wifiStreams,
                 cellularStreams = state.cellularStreams,
                 wifiInterface = state.wifiInterfaceName,
@@ -226,14 +241,18 @@ fun MainScreen(
                 downloadedBytes = state.activeItem?.downloadedBytes ?: 0L,
                 totalBytes = state.activeItem?.totalBytes ?: 0L,
                 currentSpeedMBps = state.wifiSpeedMBps + state.cellularSpeedMBps,
-                etaText = if (state.etaSeconds > 0) "${state.etaSeconds}s left" else "Calculating..."
+                etaText = etaDisplay
               )
               3 -> NetworksTab(
                 currentSpeedText = displayTotal,
-                wifiSpeedText = displayWifi,
-                cellularSpeedText = displayCell,
+                wifiSpeedText = formattedWifi.value,
+                cellularSpeedText = formattedCell.value,
+                wifiUnitText = formattedWifi.unit,
+                cellularUnitText = formattedCell.unit,
+                wifiSpeedMBps = state.wifiSpeedMBps,
+                cellularSpeedMBps = state.cellularSpeedMBps,
                 cellularActive = state.isCellularActive,
-                unitText = state.unit,
+                unitText = currentUnitText,
                 wifiStreams = state.wifiStreams,
                 cellularStreams = state.cellularStreams,
                 downloadedGB = downloadedGB,

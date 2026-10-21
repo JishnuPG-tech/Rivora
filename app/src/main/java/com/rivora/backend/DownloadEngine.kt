@@ -679,9 +679,10 @@ class DownloadEngine private constructor(
                 _engineState.update { state ->
                     val updatedHistory = state.throughputHistory.drop(1) + totalSpeedMBps
                     val active = state.activeItem
-                    val etaSec = if (totalSpeedMBps > 0.05f && active != null && active.totalBytes > 0) {
+                    val bytesPerSec = totalSpeedMBps * 1024f * 1024f
+                    val etaSec = if (bytesPerSec > 1024f && active != null && active.totalBytes > 0) {
                         val remainingBytes = (active.totalBytes - active.downloadedBytes).coerceAtLeast(0L)
-                        (remainingBytes / (totalSpeedMBps * 1024f * 1024f)).toLong()
+                        (remainingBytes / bytesPerSec).toLong()
                     } else 0L
 
                     state.copy(

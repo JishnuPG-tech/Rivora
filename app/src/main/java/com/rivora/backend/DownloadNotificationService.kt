@@ -1,4 +1,4 @@
-﻿package com.rivora.backend
+package com.rivora.backend
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.rivora.MainActivity
 import com.rivora.R
 import com.rivora.data.DownloadStatus
+import com.rivora.util.ByteFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -143,18 +144,9 @@ class DownloadNotificationService : Service() {
                     } else 0
 
                     val totalSpeed = state.wifiSpeedMBps + state.cellularSpeedMBps
-                    val speedStr = String.format("%.1f MB/s", totalSpeed)
-
-                    val downloadedMB = active.downloadedBytes / (1024f * 1024f)
-                    val totalMB = active.totalBytes / (1024f * 1024f)
-
-                    val sizeText = if (active.totalBytes > 0) {
-                        String.format("%.1f MB / %.1f MB", downloadedMB, totalMB)
-                    } else {
-                        String.format("%.1f MB", downloadedMB)
-                    }
-
-                    val etaText = if (state.etaSeconds > 0) " · ETA ${state.etaSeconds}s" else ""
+                    val speedStr = if (totalSpeed <= 0f) "0.0 KB/s" else ByteFormatter.formatSpeedText(totalSpeed, "MB/s")
+                    val sizeText = ByteFormatter.formatProgress(active.downloadedBytes, active.totalBytes)
+                    val etaText = if (state.etaSeconds > 0) " · ${ByteFormatter.formatEta(state.etaSeconds)}" else ""
                     val contentText = if (state.isPaused) "Paused · $sizeText" else "$speedStr · $sizeText$etaText"
 
                     val notification = buildDownloadNotification(

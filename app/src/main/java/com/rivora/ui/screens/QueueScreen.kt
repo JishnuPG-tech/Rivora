@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.screens
+package com.rivora.ui.screens
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,6 +61,7 @@ fun QueueScreen(
   unitText: String,
   cellularActive: Boolean,
   isPaused: Boolean = false,
+  etaText: String = "",
   onOpenDetail: (DownloadItem) -> Unit,
   onNavigateToAdd: () -> Unit,
   onOpenNetworks: () -> Unit,
@@ -191,9 +192,6 @@ fun QueueScreen(
             (activeItem.downloadedBytes.toFloat() / activeItem.totalBytes).coerceIn(0f, 1f)
           } else 0f
 
-          val activeMB = activeItem.downloadedBytes / (1024f * 1024f)
-          val totalMB = activeItem.totalBytes / (1024f * 1024f)
-
           item {
             RivoraCard(
               hasAura = true,
@@ -285,20 +283,19 @@ fun QueueScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
               ) {
-                val sizeText = if (activeItem.totalBytes > 0) {
-                  String.format(
-                    "%.1f MB of %.1f MB · %s",
-                    activeMB,
-                    totalMB,
-                    if (cellularActive) "2 networks" else "1 network"
-                  )
+                val progressText = if (activeItem.totalBytes > 0) {
+                  ByteFormatter.formatProgress(activeItem.downloadedBytes, activeItem.totalBytes)
                 } else {
-                  String.format(
-                    "%.1f MB · %s",
-                    activeMB,
-                    if (cellularActive) "2 networks" else "1 network"
-                  )
+                  ByteFormatter.formatBytes(activeItem.downloadedBytes)
                 }
+                val etaInfo = if (!isPaused && etaText.isNotBlank() && etaText != "Calculating...") {
+                  etaText
+                } else if (cellularActive) {
+                  "2 networks"
+                } else {
+                  "1 network"
+                }
+                val sizeText = "$progressText · $etaInfo"
 
                 Text(
                   text = sizeText,
