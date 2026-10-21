@@ -335,86 +335,59 @@ fun AddDownloadScreen(
                 .background(RivoraColor.Orange)
             )
             Text(
-              text = "Checking link and verifying downloadable file...",
+              text = "Checking link...",
               style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.Medium, 0f, 16f).copy(
                 color = Color(0xFFA1A1A8)
               )
             )
           }
         } else if (probeError != null) {
-          Column(
+          Row(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(top = 10.dp)
-              .clip(RoundedCornerShape(10.dp))
+              .padding(top = 8.dp)
+              .clip(RoundedCornerShape(8.dp))
               .background(Color(0xFF221214))
-              .border(1.dp, Color(0xFF6B2528), RoundedCornerShape(10.dp))
-              .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+              .border(1.dp, Color(0xFF6B2528), RoundedCornerShape(8.dp))
+              .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              Box(
-                modifier = Modifier
-                  .size(6.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFFFF5252))
-              )
-              Text(
-                text = "INVALID DOWNLOAD LINK",
-                style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.SemiBold, 0.4f, 14f).copy(
-                  color = Color(0xFFFF7070)
-                )
-              )
-            }
+            Box(
+              modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFFF5252))
+            )
             Text(
               text = probeError!!,
-              style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 17f).copy(
-                color = Color(0xFFE2C4C4)
+              style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                color = Color(0xFFFF7070)
               )
             )
           }
         } else if (validationWarning != null) {
-          Column(
+          Row(
             modifier = Modifier
               .fillMaxWidth()
-              .padding(top = 10.dp)
-              .clip(RoundedCornerShape(10.dp))
+              .padding(top = 8.dp)
+              .clip(RoundedCornerShape(8.dp))
               .background(Color(0xFF221A10))
-              .border(1.dp, Color(0xFF7A4E1A), RoundedCornerShape(10.dp))
-              .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+              .border(1.dp, Color(0xFF7A4E1A), RoundedCornerShape(8.dp))
+              .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-              Box(
-                modifier = Modifier
-                  .size(6.dp)
-                  .clip(CircleShape)
-                  .background(Color(0xFFFFB74D))
-              )
-              Text(
-                text = "NON-DOWNLOADABLE LINK",
-                style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.SemiBold, 0.4f, 14f).copy(
-                  color = Color(0xFFFFB74D)
-                )
-              )
-            }
+            Box(
+              modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFFFB74D))
+            )
             Text(
               text = validationWarning!!,
-              style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 17f).copy(
-                color = Color(0xFFE0D0BC)
-              )
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-              text = "Direct downloadable links typically end in .mp4, .mkv, .zip, .exe, .apk, .pdf, or a magnet link.",
-              style = RivoraType.rivoraText(RivoraType.Mono, 10.5f, FontWeight.Normal, 0f, 14f).copy(
-                color = Color(0xFFA89884)
+              style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                color = Color(0xFFFFB74D)
               )
             )
           }

@@ -39,6 +39,6 @@ class UrlProberTest {
         
         assertFalse(result.isSuccess)
         assertFalse(result.isDownloadable)
-        assertTrue(result.errorMessage?.contains("Invalid URL protocol") == true)
+        assertTrue(result.errorMessage?.contains("protocol", ignoreCase = true) == true)
     }
 }

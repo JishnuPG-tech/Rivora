@@ -230,71 +230,72 @@ fun NewDownloadDialog(
               Row(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .clip(RoundedCornerShape(10.dp))
-                  .background(Color(0xFF1B1B1E))
-                  .border(1.dp, Color(0xFF2A2A30), RoundedCornerShape(10.dp))
-                  .padding(12.dp),
+                  .padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
                 Box(
                   modifier = Modifier
-                    .size(8.dp)
+                    .size(6.dp)
                     .clip(CircleShape)
                     .background(Color(0xFFE5A044))
                 )
                 Text(
-                  text = "Checking link and verifying downloadable file...",
-                  style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 16f).copy(
+                  text = "Checking link...",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
                     color = Color(0xFFA1A1A8)
                   )
                 )
               }
             }
             probeError != null -> {
-              Column(
+              Row(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .clip(RoundedCornerShape(10.dp))
+                  .padding(top = 4.dp)
+                  .clip(RoundedCornerShape(8.dp))
                   .background(Color(0xFF231416))
-                  .border(1.dp, Color(0xFF5E2226), RoundedCornerShape(10.dp))
-                  .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                  .border(1.dp, Color(0xFF5E2226), RoundedCornerShape(8.dp))
+                  .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
-                Text(
-                  text = "Unreachable Download Link",
-                  style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.SemiBold, 0f, 16f).copy(
-                    color = Color(0xFFF87171)
-                  )
+                Box(
+                  modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFF87171))
                 )
                 Text(
-                  text = probeError ?: "Unable to establish connection to download server.",
-                  style = RivoraType.rivoraText(RivoraType.Sans, 11.5f, FontWeight.Normal, 0f, 15f).copy(
-                    color = Color(0xFFE2A0A4)
+                  text = probeError ?: "Unable to connect",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                    color = Color(0xFFF87171)
                   )
                 )
               }
             }
             validationWarning != null -> {
-              Column(
+              Row(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .clip(RoundedCornerShape(10.dp))
+                  .padding(top = 4.dp)
+                  .clip(RoundedCornerShape(8.dp))
                   .background(Color(0xFF241C12))
-                  .border(1.dp, Color(0xFF5E431E), RoundedCornerShape(10.dp))
-                  .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                  .border(1.dp, Color(0xFF5E431E), RoundedCornerShape(8.dp))
+                  .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
               ) {
-                Text(
-                  text = "Web Page Detected",
-                  style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.SemiBold, 0f, 16f).copy(
-                    color = Color(0xFFFBBF24)
-                  )
+                Box(
+                  modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFBBF24))
                 )
                 Text(
-                  text = validationWarning ?: "This link points to an HTML web page rather than a downloadable file.",
-                  style = RivoraType.rivoraText(RivoraType.Sans, 11.5f, FontWeight.Normal, 0f, 15f).copy(
-                    color = Color(0xFFD4C19C)
+                  text = validationWarning ?: "No file detected",
+                  style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Medium, 0f, 16f).copy(
+                    color = Color(0xFFFBBF24)
                   )
                 )
               }

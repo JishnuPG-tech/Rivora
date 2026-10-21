@@ -110,7 +110,7 @@ object UrlProber {
                 isResumable = false,
                 isDownloadable = false,
                 isSuccess = false,
-                errorMessage = "Invalid URL protocol (must start with http://, https://, or magnet:)"
+                errorMessage = "Invalid link protocol"
             )
         }
 
@@ -242,16 +242,12 @@ object UrlProber {
             // 4. HTML web page returned
             isHtmlContentType || isWebPageExt -> {
                 isDownloadable = false
-                validationWarning = if (isDownloadableExt) {
-                    "The server returned an HTML web page instead of the expected .$extensionDisplay file. A login, verification, or web session may be required."
-                } else {
-                    "This URL is an HTML web page, not a downloadable file. Rivora downloads direct files (movies, videos, audio, archives, software, documents, or torrents)."
-                }
+                validationWarning = "No file detected"
             }
             // 5. Web text or script files
             cleanContentType.startsWith("text/") || cleanContentType.contains("javascript") || cleanContentType.contains("css") -> {
                 isDownloadable = false
-                validationWarning = "This URL points to web script or text content ($cleanContentType), not a downloadable file."
+                validationWarning = "No file detected"
             }
             // 6. Generic binary stream with positive size (e.g. cloudflare download generator or dynamic binary streams)
             totalBytes > 0L && (cleanContentType.isBlank() || cleanContentType == "application/octet-stream" || cleanContentType == "application/binary") -> {
@@ -260,7 +256,7 @@ object UrlProber {
             }
             else -> {
                 isDownloadable = false
-                validationWarning = "No downloadable file could be verified at this URL. Please verify the link or enter a direct file download URL."
+                validationWarning = "No file detected"
             }
         }
 
@@ -425,12 +421,12 @@ object UrlProber {
 
     private fun formatHttpError(code: Int, message: String): String {
         return when (code) {
-            404 -> "File not found on server (HTTP 404)"
-            403 -> "Access forbidden by server (HTTP 403)"
-            401 -> "Authorization required to access this file (HTTP 401)"
-            410 -> "File has been removed from server (HTTP 410)"
-            in 500..599 -> "Server error occurred (HTTP $code)"
-            else -> "HTTP $code: ${message.ifBlank { "Request failed" }}"
+            404 -> "File not found (404)"
+            403 -> "Access forbidden (403)"
+            401 -> "Authorization required (401)"
+            410 -> "File removed (410)"
+            in 500..599 -> "Server error ($code)"
+            else -> "Request failed ($code)"
         }
     }
 
