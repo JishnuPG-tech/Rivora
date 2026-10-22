@@ -15,6 +15,16 @@ class ByteFormatterTest {
     }
 
     @Test
+    fun testFormatProgress() {
+        val total178GB = (1.78 * 1024 * 1024 * 1024).toLong()
+        assertEquals("0 B of 1.78 GB", ByteFormatter.formatProgress(0L, total178GB))
+        assertEquals("500 B of 1.78 GB", ByteFormatter.formatProgress(500L, total178GB))
+        assertEquals("150.0 KB of 1.78 GB", ByteFormatter.formatProgress(150 * 1024L, total178GB))
+        assertEquals("12.5 MB of 1.78 GB", ByteFormatter.formatProgress((12.5 * 1024 * 1024).toLong(), total178GB))
+        assertEquals("1.25 GB of 1.78 GB", ByteFormatter.formatProgress((1.25 * 1024 * 1024 * 1024).toLong(), total178GB))
+    }
+
+    @Test
     fun testFormatSpeedBytesMode() {
         // Zero
         val zero = ByteFormatter.formatSpeed(0f, "MB/s")

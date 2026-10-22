@@ -37,31 +37,14 @@ object ByteFormatter {
     }
 
     /**
-     * Formats downloaded of total matching the unit of the total file size.
+     * Formats downloaded bytes dynamically (B -> KB -> MB -> GB) against the total file size.
      * Examples:
-     * - 200MB file: "120.3 MB of 231.5 MB"
-     * - 2.4GB file: "1.25 GB of 2.40 GB"
-     * - 800KB file: "410.2 KB of 800.0 KB"
+     * - Starting 1.78 GB download: "450.0 KB of 1.78 GB" -> "12.5 MB of 1.78 GB" -> "1.25 GB of 1.78 GB"
      * - Unknown total: "120.3 MB"
      */
     fun formatProgress(downloaded: Long, total: Long): String {
         if (total <= 0L) return formatBytes(downloaded)
-
-        val kb = 1024.0
-        val mb = kb * 1024.0
-        val gb = mb * 1024.0
-        val tb = gb * 1024.0
-
-        val tot = total.toDouble()
-        val down = downloaded.toDouble()
-
-        return when {
-            tot >= tb -> String.format(Locale.US, "%.2f TB of %.2f TB", down / tb, tot / tb)
-            tot >= gb -> String.format(Locale.US, "%.2f GB of %.2f GB", down / gb, tot / gb)
-            tot >= mb -> String.format(Locale.US, "%.1f MB of %.1f MB", down / mb, tot / mb)
-            tot >= kb -> String.format(Locale.US, "%.1f KB of %.1f KB", down / kb, tot / kb)
-            else -> "$downloaded B of $total B"
-        }
+        return "${formatBytes(downloaded)} of ${formatBytes(total)}"
     }
 
     /**

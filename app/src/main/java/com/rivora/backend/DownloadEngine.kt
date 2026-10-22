@@ -75,8 +75,8 @@ class DownloadEngine private constructor(
 ) {
     companion object {
         private const val TAG = "DownloadEngine"
-        const val DEFAULT_CHUNKS_COUNT = 200
-        private const val BUFFER_SIZE = 32768 // 32 KB buffer
+        const val DEFAULT_CHUNKS_COUNT = 48
+        private const val BUFFER_SIZE = 131072 // 128 KB buffer for optimal TCP throughput and low lock contention
 
         @Volatile
         private var INSTANCE: DownloadEngine? = null
@@ -301,7 +301,7 @@ class DownloadEngine private constructor(
                 isPaused = false,
                 error = null,
                 completedChunks = completedCount,
-                totalChunks = chunkList.size.coerceAtLeast(DEFAULT_CHUNKS_COUNT)
+                totalChunks = chunkList.size.coerceAtLeast(1)
             )
         }
 
@@ -352,7 +352,7 @@ class DownloadEngine private constructor(
             return
         }
 
-        val numChunks = DEFAULT_CHUNKS_COUNT
+        val numChunks = calculateOptimalChunkCount(totalBytes)
         val chunkSize = (totalBytes + numChunks - 1) / numChunks
 
         for (i in 0 until numChunks) {
@@ -361,6 +361,21 @@ class DownloadEngine private constructor(
             if (start <= end) {
                 chunkList.add(ChunkProgress(index = i, startByte = start, endByte = end))
             }
+        }
+    }
+
+    /**
+     * Determines optimal chunk count based on total download size to balance
+     * parallel bandwidth aggregation with TCP congestion window ramp-up and low connection overhead.
+     */
+    private fun calculateOptimalChunkCount(totalBytes: Long): Int {
+        val mb = totalBytes / (1024L * 1024L)
+        return when {
+            mb <= 10 -> 4       // Up to 10 MB: 4 chunks
+            mb <= 50 -> 8       // 10 - 50 MB: 8 chunks
+            mb <= 250 -> 16     // 50 - 250 MB: 16 chunks
+            mb <= 1000 -> 32    // 250 MB - 1 GB: 32 chunks
+            else -> 48          // > 1 GB: 48 chunks (~37 MB per chunk for 1.78 GB)
         }
     }
 
@@ -437,9 +452,9 @@ class DownloadEngine private constructor(
                 val cellConnected = states[NetworkAdapterType.CELLULAR]?.isConnected == true && isCellularEnabled.get()
 
                 val (targetWifiStreams, targetCellStreams) = when {
-                    wifiConnected && cellConnected -> 3 to 3
-                    wifiConnected -> 5 to 0
-                    cellConnected -> 0 to 5
+                    wifiConnected && cellConnected -> 4 to 4
+                    wifiConnected -> 6 to 0
+                    cellConnected -> 0 to 6
                     else -> 0 to 0
                 }
 
@@ -599,9 +614,9 @@ class DownloadEngine private constructor(
                         cellularBytesTotal.addAndGet(bytesRead.toLong())
                     }
 
-                    // Periodic disk sync and state persistence every 1 second
+                    // Periodic disk sync and state persistence every 2 seconds
                     val now = System.currentTimeMillis()
-                    if (now - lastSyncTime > 1000) {
+                    if (now - lastSyncTime > 2000) {
                         lastSyncTime = now
                         DownloadStorageHelper.sync(target)
                         val active = _engineState.value.activeItem
@@ -612,13 +627,6 @@ class DownloadEngine private constructor(
                                 targetFile = target?.file
                             )
                         }
-                    }
-
-                    // Update UI state
-                    val currentTotal = totalBytesDownloaded.get()
-                    _engineState.update { state ->
-                        val item = state.activeItem ?: return@update state
-                        state.copy(activeItem = item.copy(downloadedBytes = currentTotal))
                     }
                 }
 
@@ -904,13 +912,15 @@ class DownloadEngine private constructor(
                 _engineState.update { state ->
                     val updatedHistory = state.throughputHistory.drop(1) + totalSpeedMBps
                     val active = state.activeItem
+                    val currentDownloaded = totalBytesDownloaded.get()
                     val bytesPerSec = totalSpeedMBps * 1024f * 1024f
                     val etaSec = if (bytesPerSec > 1024f && active != null && active.totalBytes > 0) {
-                        val remainingBytes = (active.totalBytes - active.downloadedBytes).coerceAtLeast(0L)
+                        val remainingBytes = (active.totalBytes - currentDownloaded).coerceAtLeast(0L)
                         (remainingBytes / bytesPerSec).toLong()
                     } else 0L
 
                     state.copy(
+                        activeItem = if (active != null && state.isDownloading) active.copy(downloadedBytes = currentDownloaded) else active,
                         wifiSpeedMBps = wifiSpeedMBps,
                         cellularSpeedMBps = cellSpeedMBps,
                         throughputHistory = updatedHistory,

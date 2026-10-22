@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import java.net.Inet4Address
@@ -80,11 +81,26 @@ class MultiNetworkManager(
     // Map of active network types to their bound Network object
     private val boundNetworks = ConcurrentHashMap<NetworkAdapterType, Network>()
 
+    // Dedicated connection pools per adapter to keep TCP connections warm and multiplexed
+    // while ensuring strict socket isolation across adapters
+    private val connectionPools = ConcurrentHashMap<NetworkAdapterType, ConnectionPool>()
+
+    private fun getConnectionPool(type: NetworkAdapterType): ConnectionPool {
+        return connectionPools.getOrPut(type) {
+            ConnectionPool(16, 5, TimeUnit.MINUTES)
+        }
+    }
+
     // Map of active network types to their dedicated OkHttpClient
     private val clientCache = ConcurrentHashMap<NetworkAdapterType, OkHttpClient>()
 
     // Base client template
     private val baseClient = OkHttpClient.Builder()
+        .dispatcher(Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 32
+        })
+        .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -306,10 +322,16 @@ class MultiNetworkManager(
                 .build()
 
             cellularCallback = createCallback(NetworkAdapterType.CELLULAR, "Cellular", "rmnet0")
-            // requestNetwork forces Android telephony to activate mobile data even when Wi-Fi is primary!
-            connectivityManager.requestNetwork(cellularRequest, cellularCallback!!)
-            isCellularRequested = true
-            Log.d(TAG, "Requested concurrent cellular network session.")
+            try {
+                // requestNetwork forces Android telephony to activate mobile data even when Wi-Fi is primary!
+                connectivityManager.requestNetwork(cellularRequest, cellularCallback!!)
+                isCellularRequested = true
+                Log.d(TAG, "Requested concurrent cellular network session.")
+            } catch (e: Exception) {
+                Log.w(TAG, "requestNetwork for Cellular fell back to registerNetworkCallback: ${e.message}")
+                connectivityManager.registerNetworkCallback(cellularRequest, cellularCallback!!)
+                isCellularRequested = true
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to request cellular network: ${e.message}", e)
         }
@@ -358,6 +380,8 @@ class MultiNetworkManager(
             isRegistered = false
             boundNetworks.clear()
             clientCache.clear()
+            connectionPools.values.forEach { it.evictAll() }
+            connectionPools.clear()
             hostDnsCache.clear()
             Log.d(TAG, "Stopped all network monitoring.")
         } catch (e: Exception) {
@@ -376,7 +400,11 @@ class MultiNetworkManager(
 
         val network = boundNetworks[type] ?: return null
         val newClient = OkHttpClient.Builder()
-            .connectionPool(ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
+            .dispatcher(Dispatcher().apply {
+                maxRequests = 64
+                maxRequestsPerHost = 32
+            })
+            .connectionPool(getConnectionPool(type))
             .socketFactory(network.socketFactory)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
