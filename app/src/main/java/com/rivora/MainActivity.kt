@@ -1,4 +1,4 @@
-﻿package com.rivora
+package com.rivora
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -49,10 +49,5 @@ class MainActivity : ComponentActivity() {
         }
       }
     }
-  }
-
-  override fun onDestroy() {
-    super.onDestroy()
-    MultiNetworkManager.getInstance(this).stopMonitoring()
   }
 }

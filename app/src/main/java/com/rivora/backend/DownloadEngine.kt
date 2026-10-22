@@ -139,11 +139,13 @@ class DownloadEngine private constructor(
                 chunkList.clear()
                 chunkList.addAll(session.activeChunks)
                 totalBytesDownloaded.set(session.activeItem.downloadedBytes)
+                isPaused.set(true)
+                isCancelled.set(false)
 
                 val completedCount = session.activeChunks.count { it.status == ChunkStatus.COMPLETED }
                 _engineState.update { current ->
                     current.copy(
-                        activeItem = session.activeItem,
+                        activeItem = session.activeItem.copy(status = DownloadStatus.PAUSED),
                         queue = session.queuedItems,
                         finished = session.finishedItems,
                         isPaused = true,
@@ -277,19 +279,21 @@ class DownloadEngine private constructor(
     private suspend fun executeDownloadItem(item: DownloadItem, isResumable: Boolean) {
         val activeItem = item.copy(status = DownloadStatus.ACTIVE)
 
-        // ALWAYS clear previous in-memory chunk list so chunks from previous downloads NEVER leak
-        chunkList.clear()
-
-        // Always check persistent storage for saved chunks of this specific file
-        val savedChunks = RivoraPersistenceManager.loadChunks(activeItem.fileName)
-        if (savedChunks.isNotEmpty() && savedChunks.any { it.downloadedBytes > 0L }) {
-            chunkList.addAll(savedChunks)
-            totalBytesDownloaded.set(savedChunks.sumOf { it.downloadedBytes })
-            Log.d(TAG, "Restored ${savedChunks.size} chunks for ${activeItem.fileName} (${totalBytesDownloaded.get()} bytes)")
+        // Clear previous in-memory chunk list if switching items or fresh start
+        if (chunkList.isEmpty() || _engineState.value.activeItem?.id != activeItem.id) {
+            chunkList.clear()
+            val savedChunks = RivoraPersistenceManager.loadChunks(activeItem.fileName)
+            if (savedChunks.isNotEmpty() && savedChunks.any { it.downloadedBytes > 0L }) {
+                chunkList.addAll(savedChunks)
+                totalBytesDownloaded.set(savedChunks.sumOf { it.downloadedBytes })
+                Log.d(TAG, "Restored ${savedChunks.size} chunks for ${activeItem.fileName} (${totalBytesDownloaded.get()} bytes)")
+            } else {
+                partitionChunks(activeItem.totalBytes)
+                totalBytesDownloaded.set(0L)
+                Log.d(TAG, "Partitioned fresh chunks for ${activeItem.fileName} (total: ${activeItem.totalBytes} bytes)")
+            }
         } else {
-            partitionChunks(activeItem.totalBytes)
-            totalBytesDownloaded.set(0L)
-            Log.d(TAG, "Partitioned fresh chunks for ${activeItem.fileName} (total: ${activeItem.totalBytes} bytes)")
+            totalBytesDownloaded.set(chunkList.sumOf { it.downloadedBytes })
         }
 
         val completedCount = chunkList.count { it.status == ChunkStatus.COMPLETED }
@@ -339,10 +343,8 @@ class DownloadEngine private constructor(
         isPaused.set(false)
         isCancelled.set(false)
 
-        // Launch concurrent download workers
-        activeJob = scope.launch {
-            runDownloadWorkers(activeItem.downloadUrl, activeItem.totalBytes, isResumable)
-        }
+        // Launch concurrent download workers directly
+        runDownloadWorkers(activeItem.downloadUrl, activeItem.totalBytes, isResumable)
     }
 
     private fun partitionChunks(totalBytes: Long) {
@@ -414,17 +416,33 @@ class DownloadEngine private constructor(
 
                 repeat(needed) {
                     val job = scope.launch {
-                        while (!isCancelled.get() && pendingChunks.isNotEmpty()) {
-                            while (isPaused.get() && !isCancelled.get()) delay(200)
-                            while (!isCellularEnabled.get() && type == NetworkAdapterType.CELLULAR && !isCancelled.get()) delay(200)
-                            if (isCancelled.get()) break
-
+                        while (isActive && !isCancelled.get() && !isPaused.get()) {
                             // Wait gracefully if device temporarily loses connectivity (e.g. Aeroplane mode)
-                            while (!networkManager.isAnyNetworkConnected() && !isCancelled.get()) {
+                            while (isActive && !networkManager.isAnyNetworkConnected() && !isCancelled.get() && !isPaused.get()) {
                                 delay(500)
                             }
+                            if (!isActive || isCancelled.get() || isPaused.get()) break
 
-                            val chunk = pendingChunks.poll() ?: break
+                            if (!isCellularEnabled.get() && type == NetworkAdapterType.CELLULAR) {
+                                delay(500)
+                                continue
+                            }
+
+                            val chunk = pendingChunks.poll()
+                            if (chunk == null) {
+                                // No pending chunk right now.
+                                // If all chunks in chunkList are completed, worker can cleanly exit
+                                if (chunkList.all { it.status == ChunkStatus.COMPLETED }) {
+                                    break
+                                }
+                                // Otherwise other chunks are still downloading or might fail and requeue. Keep worker alive!
+                                delay(200)
+                                continue
+                            }
+
+                            chunk.status = ChunkStatus.DOWNLOADING
+                            chunk.networkType = type
+
                             // Fetch dynamic, current client bound to latest network socket
                             val dynamicClient = if (type == NetworkAdapterType.UNKNOWN) {
                                 networkManager.getDefaultClient()
@@ -432,11 +450,21 @@ class DownloadEngine private constructor(
                                 networkManager.getClient(type) ?: networkManager.getDefaultClient()
                             }
 
-                            val success = downloadChunk(dynamicClient, url, chunk, type, isResumable)
-                            if (!success && chunk.status != ChunkStatus.COMPLETED && !isCancelled.get()) {
-                                // Put back on queue for another active stream or retry
+                            var success = false
+                            try {
+                                success = downloadChunk(dynamicClient, url, chunk, type, isResumable)
+                            } catch (e: CancellationException) {
+                                chunk.status = ChunkStatus.PENDING
                                 pendingChunks.add(chunk)
-                                delay(300)
+                                throw e
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Chunk ${chunk.index} execution error: ${e.message}")
+                            }
+
+                            if (!success && chunk.status != ChunkStatus.COMPLETED && !isCancelled.get() && !isPaused.get()) {
+                                chunk.status = ChunkStatus.PENDING
+                                pendingChunks.add(chunk)
+                                delay(200)
                             }
                         }
                     }
@@ -485,8 +513,8 @@ class DownloadEngine private constructor(
             }
         }
 
-        // Wait until all chunks are completed or cancelled
-        while (!isCancelled.get() && chunkList.any { it.status != ChunkStatus.COMPLETED }) {
+        // Wait until all chunks are completed or paused or cancelled
+        while (!isCancelled.get() && !isPaused.get() && chunkList.any { it.status != ChunkStatus.COMPLETED }) {
             delay(200)
         }
 
@@ -500,7 +528,7 @@ class DownloadEngine private constructor(
 
         // Finalize completed download
         val target = currentStorageTarget
-        if (!isCancelled.get() && target != null) {
+        if (!isCancelled.get() && !isPaused.get() && chunkList.all { it.status == ChunkStatus.COMPLETED } && target != null) {
             DownloadStorageHelper.markCompleted(context, target)
             currentStorageTarget = null
 
@@ -553,106 +581,108 @@ class DownloadEngine private constructor(
         adapterType: NetworkAdapterType,
         isResumable: Boolean
     ): Boolean {
+        val chunkLen = if (chunk.endByte > 0) (chunk.endByte - chunk.startByte + 1) else -1L
+        if (chunkLen > 0 && chunk.downloadedBytes >= chunkLen) {
+            chunk.status = ChunkStatus.COMPLETED
+            return true
+        }
+
         chunk.status = ChunkStatus.DOWNLOADING
         chunk.networkType = adapterType
 
         var retryCount = 0
-        val maxRetries = 5
+        val maxRetries = 3
 
-        while (retryCount < maxRetries && !isCancelled.get()) {
+        while (retryCount < maxRetries && !isCancelled.get() && !isPaused.get()) {
+            val client = if (retryCount == 0) {
+                initialClient
+            } else if (adapterType == NetworkAdapterType.UNKNOWN) {
+                networkManager.getDefaultClient()
+            } else {
+                networkManager.getClient(adapterType) ?: networkManager.getDefaultClient()
+            }
+
+            val reqBuilder = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36")
+                .header("Accept", "*/*")
+                .header("Accept-Encoding", "identity")
+                .header("Connection", "keep-alive")
+            if (isResumable && chunk.endByte > 0) {
+                val currentStart = chunk.startByte + chunk.downloadedBytes
+                if (currentStart > chunk.endByte) {
+                    chunk.status = ChunkStatus.COMPLETED
+                    return true
+                }
+                reqBuilder.header("Range", "bytes=$currentStart-${chunk.endByte}")
+            }
+
+            val call = client.newCall(reqBuilder.build())
             try {
-                // Ensure active client dynamically reflects the currently bound physical network
-                val client = if (retryCount == 0) {
-                    initialClient
-                } else if (adapterType == NetworkAdapterType.UNKNOWN) {
-                    networkManager.getDefaultClient()
-                } else {
-                    networkManager.getClient(adapterType) ?: networkManager.getDefaultClient()
-                }
-
-                val reqBuilder = Request.Builder()
-                    .url(url)
-                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36")
-                    .header("Accept", "*/*")
-                    .header("Accept-Encoding", "identity")
-                    .header("Connection", "keep-alive")
-                if (isResumable && chunk.endByte > 0) {
-                    val currentStart = chunk.startByte + chunk.downloadedBytes
-                    reqBuilder.header("Range", "bytes=$currentStart-${chunk.endByte}")
-                }
-
-                val response = client.newCall(reqBuilder.build()).execute()
-                if (!response.isSuccessful && response.code != 206) {
-                    response.close()
-                    throw Exception("HTTP ${response.code}")
-                }
-
-                val body = response.body ?: throw Exception("Empty response body")
-                val stream = body.byteStream()
-                val buffer = ByteArray(BUFFER_SIZE)
-                var bytesRead: Int
-
-                while (stream.read(buffer).also { bytesRead = it } != -1) {
-                    if (isCancelled.get()) {
-                        response.close()
-                        return false
-                    }
-                    while (isPaused.get()) delay(200)
-                    while (!isCellularEnabled.get() && adapterType == NetworkAdapterType.CELLULAR && !isCancelled.get()) {
-                        delay(200)
+                val response = call.execute()
+                response.use { res ->
+                    if (!res.isSuccessful && res.code != 206) {
+                        throw Exception("HTTP ${res.code}")
                     }
 
-                    // Write to file at designated offset
-                    val writeOffset = chunk.startByte + chunk.downloadedBytes
-                    val target = currentStorageTarget
-                    if (target != null) {
+                    val body = res.body ?: throw Exception("Empty response body")
+                    val stream = body.byteStream()
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    var bytesRead: Int
+
+                    while (stream.read(buffer).also { bytesRead = it } != -1) {
+                        if (isCancelled.get() || isPaused.get()) {
+                            call.cancel()
+                            return false
+                        }
+
+                        val target = currentStorageTarget ?: return false
+                        val writeOffset = chunk.startByte + chunk.downloadedBytes
                         synchronized(target) {
                             target.sink.seek(writeOffset)
                             target.sink.write(buffer, 0, bytesRead)
                         }
-                    }
 
-                    chunk.downloadedBytes += bytesRead
-                    totalBytesDownloaded.addAndGet(bytesRead.toLong())
+                        chunk.downloadedBytes += bytesRead
+                        totalBytesDownloaded.addAndGet(bytesRead.toLong())
 
-                    if (adapterType == NetworkAdapterType.WIFI) {
-                        wifiBytesTotal.addAndGet(bytesRead.toLong())
-                    } else {
-                        cellularBytesTotal.addAndGet(bytesRead.toLong())
-                    }
+                        if (adapterType == NetworkAdapterType.WIFI) {
+                            wifiBytesTotal.addAndGet(bytesRead.toLong())
+                        } else {
+                            cellularBytesTotal.addAndGet(bytesRead.toLong())
+                        }
 
-                    // Periodic disk sync and state persistence every 2 seconds
-                    val now = System.currentTimeMillis()
-                    if (now - lastSyncTime > 2000) {
-                        lastSyncTime = now
-                        DownloadStorageHelper.sync(target)
-                        val active = _engineState.value.activeItem
-                        if (active != null) {
-                            RivoraPersistenceManager.saveDownloadState(
-                                item = active.copy(downloadedBytes = totalBytesDownloaded.get(), status = DownloadStatus.ACTIVE),
-                                chunks = chunkList,
-                                targetFile = target?.file
-                            )
+                        // Periodic disk sync and persistence every 2 seconds
+                        val now = System.currentTimeMillis()
+                        if (now - lastSyncTime > 2000) {
+                            lastSyncTime = now
+                            DownloadStorageHelper.sync(target)
+                            val active = _engineState.value.activeItem
+                            if (active != null) {
+                                RivoraPersistenceManager.saveDownloadState(
+                                    item = active.copy(downloadedBytes = totalBytesDownloaded.get(), status = DownloadStatus.ACTIVE),
+                                    chunks = chunkList,
+                                    targetFile = target.file
+                                )
+                            }
                         }
                     }
+
+                    chunk.status = ChunkStatus.COMPLETED
+                    val completed = chunkList.count { it.status == ChunkStatus.COMPLETED }
+                    _engineState.update { it.copy(completedChunks = completed) }
+                    return true
                 }
-
-                response.close()
-                chunk.status = ChunkStatus.COMPLETED
-
-                val completed = chunkList.count { it.status == ChunkStatus.COMPLETED }
-                _engineState.update { it.copy(completedChunks = completed) }
-                return true
-
             } catch (e: Exception) {
-                if (e is CancellationException) return false
+                call.cancel()
+                if (e is CancellationException || isCancelled.get() || isPaused.get()) {
+                    return false
+                }
                 Log.w(TAG, "Chunk ${chunk.index} attempt $retryCount failed on $adapterType: ${e.message}")
                 if (!networkManager.isAnyNetworkConnected()) {
-                    Log.d(TAG, "Network offline during chunk ${chunk.index}, pausing until connection restores...")
-                    while (!networkManager.isAnyNetworkConnected() && !isCancelled.get()) {
+                    while (!networkManager.isAnyNetworkConnected() && !isCancelled.get() && !isPaused.get()) {
                         delay(500)
                     }
-                    Log.d(TAG, "Network restored, resuming chunk ${chunk.index}")
                 } else {
                     retryCount++
                     delay(300)
@@ -689,6 +719,7 @@ class DownloadEngine private constructor(
         // If an active download is running, put the current active download back into queue
         val currentActive = _engineState.value.activeItem
         if (currentActive != null && currentActive.status != DownloadStatus.FINISHED) {
+            pauseDownload()
             RivoraPersistenceManager.saveDownloadState(
                 item = currentActive.copy(status = DownloadStatus.QUEUED, downloadedBytes = totalBytesDownloaded.get()),
                 chunks = chunkList,
@@ -732,24 +763,46 @@ class DownloadEngine private constructor(
             isPaused.set(true)
             smoothedWifiSpeedMBps = 0f
             smoothedCellSpeedMBps = 0f
-            _engineState.update { current ->
-                val active = current.activeItem?.copy(status = DownloadStatus.PAUSED)
-                current.copy(isPaused = true, activeItem = active)
-            }
+
+            // Cancel active jobs to abort worker sockets cleanly and instantly
+            activeJob?.cancel()
+            activeJob = null
+
+            // Flush storage target and close sink
+            DownloadStorageHelper.sync(currentStorageTarget)
+            try {
+                currentStorageTarget?.sink?.close()
+            } catch (_: Exception) {}
+            currentStorageTarget = null
+
             val active = _engineState.value.activeItem
             if (active != null) {
                 RivoraPersistenceManager.saveDownloadState(
                     item = active.copy(status = DownloadStatus.PAUSED, downloadedBytes = totalBytesDownloaded.get()),
                     chunks = chunkList,
-                    targetFile = currentStorageTarget?.file
+                    targetFile = null
                 )
             }
+
+            _engineState.update { current ->
+                val updatedActive = current.activeItem?.copy(status = DownloadStatus.PAUSED)
+                current.copy(
+                    isPaused = true,
+                    isDownloading = false,
+                    wifiSpeedMBps = 0f,
+                    cellularSpeedMBps = 0f,
+                    wifiStreams = 0,
+                    cellularStreams = 0,
+                    etaSeconds = 0,
+                    activeItem = updatedActive
+                )
+            }
+            Log.d(TAG, "Download paused cleanly. Workers stopped, sockets aborted, state persisted.")
         }
     }
 
     /**
-     * Resume a paused download. If the background job is not running (e.g. after app restart/reinstall),
-     * spawns workers to resume right where the download left off without starting from byte 0.
+     * Resume a paused download. Spawns workers cleanly to resume right where the download left off.
      */
     fun resumeDownload() {
         val active = _engineState.value.activeItem ?: return
@@ -757,23 +810,25 @@ class DownloadEngine private constructor(
         isCancelled.set(false)
         smoothedWifiSpeedMBps = 0f
         smoothedCellSpeedMBps = 0f
+
         _engineState.update { current ->
             val updated = current.activeItem?.copy(status = DownloadStatus.ACTIVE)
-            current.copy(isPaused = false, isDownloading = true, activeItem = updated)
+            current.copy(isPaused = false, isDownloading = true, activeItem = updated, error = null)
         }
 
-        if (activeJob == null || activeJob?.isActive != true) {
-            scope.launch {
-                executeDownloadItem(active, isResumable = true)
-            }
+        activeJob?.cancel()
+        activeJob = scope.launch {
+            executeDownloadItem(active, isResumable = true)
         }
+        Log.d(TAG, "Resuming download cleanly: ${active.fileName}")
     }
 
     /**
      * Toggle pause / resume.
      */
     fun togglePause() {
-        if (isPaused.get()) {
+        val currentlyPaused = isPaused.get() || _engineState.value.isPaused || !_engineState.value.isDownloading
+        if (currentlyPaused) {
             resumeDownload()
         } else {
             pauseDownload()
@@ -786,6 +841,7 @@ class DownloadEngine private constructor(
      */
     fun cancelDownload() {
         isCancelled.set(true)
+        isPaused.set(false)
         stopActiveDownloadOnly()
 
         val active = _engineState.value.activeItem

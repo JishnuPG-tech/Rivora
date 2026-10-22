@@ -235,12 +235,14 @@ class MultiNetworkManager(
                 defaultCallback = object : ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: Network) {
                         Log.d(TAG, "Default network restored: $network")
-                        if (!isWifiRequested) requestWifiConcurrency()
-                        if (!isCellularRequested) requestCellularConcurrency()
+                        clientCache.clear()
+                        hostDnsCache.clear()
+                        refreshNetworks()
                     }
                     override fun onLost(network: Network) {
                         Log.d(TAG, "Default network lost: $network")
                         clientCache.clear()
+                        hostDnsCache.clear()
                     }
                 }
                 connectivityManager.registerDefaultNetworkCallback(defaultCallback!!)
@@ -480,6 +482,57 @@ class MultiNetworkManager(
         }
     }
 
+    /**
+     * Rescans all active networks to restore Wi-Fi and Cellular bindings immediately upon network changes.
+     */
+    fun refreshNetworks() {
+        if (connectivityManager == null) return
+        try {
+            for (network in connectivityManager.allNetworks) {
+                val caps = connectivityManager.getNetworkCapabilities(network) ?: continue
+                val lp = connectivityManager.getLinkProperties(network)
+                val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                if (!hasInternet) continue
+
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                    boundNetworks[NetworkAdapterType.WIFI] = network
+                    clientCache.remove(NetworkAdapterType.WIFI)
+                    val ifName = lp?.interfaceName ?: "wlan0"
+                    val ipv4 = lp?.linkAddresses?.mapNotNull { it.address }
+                        ?.filterIsInstance<Inet4Address>()?.firstOrNull()?.hostAddress
+                    _networkStates.update { current ->
+                        current + (NetworkAdapterType.WIFI to NetworkAdapterInfo(
+                            type = NetworkAdapterType.WIFI,
+                            name = "Wi-Fi",
+                            interfaceName = ifName,
+                            isAvailable = true,
+                            isConnected = true,
+                            ipAddress = ipv4
+                        ))
+                    }
+                } else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+                    boundNetworks[NetworkAdapterType.CELLULAR] = network
+                    clientCache.remove(NetworkAdapterType.CELLULAR)
+                    val ifName = lp?.interfaceName ?: "rmnet0"
+                    val ipv4 = lp?.linkAddresses?.mapNotNull { it.address }
+                        ?.filterIsInstance<Inet4Address>()?.firstOrNull()?.hostAddress
+                    _networkStates.update { current ->
+                        current + (NetworkAdapterType.CELLULAR to NetworkAdapterInfo(
+                            type = NetworkAdapterType.CELLULAR,
+                            name = "Cellular",
+                            interfaceName = ifName,
+                            isAvailable = true,
+                            isConnected = true,
+                            ipAddress = ipv4
+                        ))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "refreshNetworks error: ${e.message}")
+        }
+    }
+
     private fun createCallback(
         adapterType: NetworkAdapterType,
         defaultName: String,
@@ -489,6 +542,7 @@ class MultiNetworkManager(
             override fun onAvailable(network: Network) {
                 boundNetworks[adapterType] = network
                 clientCache.remove(adapterType) // invalidate cached client to recreate bound client
+                hostDnsCache.clear()
 
                 val lp = connectivityManager?.getLinkProperties(network)
                 val caps = connectivityManager?.getNetworkCapabilities(network)
@@ -519,6 +573,7 @@ class MultiNetworkManager(
             override fun onLost(network: Network) {
                 boundNetworks.remove(adapterType)
                 clientCache.remove(adapterType)
+                hostDnsCache.clear()
 
                 _networkStates.update { current ->
                     val existing = current[adapterType] ?: NetworkAdapterInfo(

@@ -1,4 +1,4 @@
-﻿package com.rivora.ui.main
+package com.rivora.ui.main
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -158,7 +158,6 @@ class MainScreenViewModel : ViewModel() {
     try {
       com.rivora.backend.DownloadEngine.getInstance().togglePause()
     } catch (_: Exception) {}
-    _uiState.update { it.copy(isPaused = !it.isPaused) }
   }
 
   fun cancelDownload() {
