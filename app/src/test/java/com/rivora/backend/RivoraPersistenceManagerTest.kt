@@ -56,4 +56,14 @@ class RivoraPersistenceManagerTest {
         RivoraPersistenceManager.deleteDownloadState(fileName, payloadFile)
         assertTrue("Meta file should be deleted", !metaFile.exists())
     }
+
+    @Test
+    fun testGetMimeType() {
+        assertEquals("video/x-matroska", DownloadStorageHelper.getMimeType("Movie.1080p.mkv"))
+        assertEquals("video/mp4", DownloadStorageHelper.getMimeType("sample.mp4"))
+        assertEquals("video/x-msvideo", DownloadStorageHelper.getMimeType("video.avi"))
+        assertEquals("video/webm", DownloadStorageHelper.getMimeType("clip.webm"))
+        assertEquals("application/pdf", DownloadStorageHelper.getMimeType("doc.pdf"))
+        assertEquals("application/zip", DownloadStorageHelper.getMimeType("archive.zip"))
+    }
 }

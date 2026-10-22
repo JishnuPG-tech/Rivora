@@ -171,15 +171,18 @@ object RivoraPersistenceManager {
                 val targetFile = File(filePath)
                 val defaultFile = File(rivoraDir, fileName)
 
-                // Verify the physical payload file exists on disk
-                if (!targetFile.exists() && !defaultFile.exists()) {
+                val statusStr = json.optString("status", DownloadStatus.PAUSED.name)
+                val status = try { DownloadStatus.valueOf(statusStr) } catch (_: Exception) { DownloadStatus.PAUSED }
+                val downloadedBytes = json.getLong("downloadedBytes").coerceAtLeast(0L)
+                val isQueued = status == DownloadStatus.QUEUED || (status == DownloadStatus.PAUSED && downloadedBytes == 0L)
+
+                // Verify the physical payload file exists on disk (unless item is queued and not yet allocated)
+                if (!isQueued && !targetFile.exists() && !defaultFile.exists()) {
                     Log.w(TAG, "Payload file $fileName does not exist on disk, skipping restore")
                     continue
                 }
 
                 val totalBytes = json.getLong("totalBytes")
-                val downloadedBytes = json.getLong("downloadedBytes").coerceAtLeast(0L)
-                val statusStr = json.optString("status", DownloadStatus.PAUSED.name)
                 val url = json.optString("url", "")
                 val id = json.optString("id", "dl_${System.currentTimeMillis()}")
                 val ext = json.optString("fileExtension", fileName.substringAfterLast('.', "BIN").uppercase())
@@ -204,8 +207,6 @@ object RivoraPersistenceManager {
                     }
                 }
 
-                val status = try { DownloadStatus.valueOf(statusStr) } catch (_: Exception) { DownloadStatus.PAUSED }
-
                 if (status == DownloadStatus.FINISHED || (totalBytes > 0 && downloadedBytes >= totalBytes)) {
                     finishedItems.add(
                         DownloadItem(
@@ -220,14 +221,14 @@ object RivoraPersistenceManager {
                         )
                     )
                 } else {
-                    // Always restore unfinished downloads in PAUSED state so user can review and tap Resume
+                    // Restore unfinished downloads in PAUSED or QUEUED state
                     val restoredItem = DownloadItem(
                         id = id,
                         fileName = fileName,
                         fileExtension = ext,
                         totalBytes = totalBytes,
                         downloadedBytes = downloadedBytes,
-                        status = DownloadStatus.PAUSED,
+                        status = if (status == DownloadStatus.QUEUED) DownloadStatus.QUEUED else DownloadStatus.PAUSED,
                         destinationPath = destPath,
                         downloadUrl = url
                     )

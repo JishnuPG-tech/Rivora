@@ -3,6 +3,7 @@ package com.rivora.backend
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -111,10 +112,45 @@ object DownloadStorageHelper {
 
     fun getMimeType(fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        return if (ext.isNotEmpty()) {
-            MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
-        } else {
-            "application/octet-stream"
+        return when (ext) {
+            "mkv" -> "video/x-matroska"
+            "mp4" -> "video/mp4"
+            "avi" -> "video/x-msvideo"
+            "webm" -> "video/webm"
+            "mov" -> "video/quicktime"
+            "wmv" -> "video/x-ms-wmv"
+            "flv" -> "video/x-flv"
+            "ts", "m2ts" -> "video/mp2t"
+            "m4v" -> "video/x-m4v"
+            "3gp", "3gpp" -> "video/3gpp"
+            "mp3" -> "audio/mpeg"
+            "aac" -> "audio/aac"
+            "wav" -> "audio/wav"
+            "flac" -> "audio/flac"
+            "ogg", "oga" -> "audio/ogg"
+            "m4a" -> "audio/mp4"
+            "opus" -> "audio/opus"
+            "pdf" -> "application/pdf"
+            "apk" -> "application/vnd.android.package-archive"
+            "zip" -> "application/zip"
+            "rar" -> "application/vnd.rar"
+            "7z" -> "application/x-7z-compressed"
+            "tar" -> "application/x-tar"
+            "gz" -> "application/gzip"
+            "iso" -> "application/x-iso9660-image"
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "txt" -> "text/plain"
+            "html" -> "text/html"
+            else -> {
+                if (ext.isNotEmpty()) {
+                    MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+                } else {
+                    "*/*"
+                }
+            }
         }
     }
 
@@ -295,17 +331,19 @@ object DownloadStorageHelper {
             } catch (_: Exception) {}
         }
 
-        // Trigger MediaScanner for direct files
-        target.file?.let { file ->
-            try {
+        // Trigger MediaScanner for direct files or files in persistent Rivora directory
+        try {
+            val fileToScan = target.file 
+                ?: File(RivoraPersistenceManager.getRivoraDir(), target.displayName)
+            if (fileToScan.exists()) {
                 MediaScannerConnection.scanFile(
                     context,
-                    arrayOf(file.absolutePath),
+                    arrayOf(fileToScan.absolutePath),
                     arrayOf(getMimeType(target.displayName)),
                     null
                 )
-            } catch (_: Exception) {}
-        }
+            }
+        } catch (_: Exception) {}
     }
 
     /**
@@ -364,37 +402,68 @@ object DownloadStorageHelper {
     }
 
     /**
-     * Opens the completed download in the user's preferred viewer/app.
+     * Opens the completed download in the user's preferred viewer/app (e.g. VLC, MX Player, Photos).
+     * Uses FileProvider with explicit URI permissions to guarantee external media players have full read access.
      */
     fun openFile(context: Context, fileName: String, fileUriString: String?) {
         try {
             val mimeType = getMimeType(fileName)
+
+            // 1. Resolve physical file on disk to serve via our own FileProvider.
+            // Our FileProvider gives full authority to grant read permissions to external media players.
+            val rivoraFile = File(RivoraPersistenceManager.getRivoraDir(), fileName)
+            val publicFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
+            val extFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+            val fileToOpen = when {
+                rivoraFile.exists() -> rivoraFile
+                publicFile.exists() -> publicFile
+                extFile.exists() -> extFile
+                else -> null
+            }
+
+            val uriToOpen: Uri = if (fileToOpen != null) {
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", fileToOpen)
+            } else if (!fileUriString.isNullOrBlank()) {
+                Uri.parse(fileUriString)
+            } else {
+                Log.w(TAG, "Cannot open file $fileName: file not found on disk")
+                return
+            }
+
             val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uriToOpen, mimeType)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
-            if (!fileUriString.isNullOrBlank()) {
-                intent.setDataAndType(Uri.parse(fileUriString), mimeType)
-                context.startActivity(intent)
-                return
+            // Explicitly grant read permission to all matching activities
+            try {
+                val resInfoList = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.queryIntentActivities(
+                        intent,
+                        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                }
+                for (resolveInfo in resInfoList) {
+                    val packageName = resolveInfo.activityInfo.packageName
+                    try {
+                        context.grantUriPermission(packageName, uriToOpen, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    } catch (_: Exception) {}
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed granting explicit URI permissions: ${e.message}")
             }
 
-            val rivoraFile = File(RivoraPersistenceManager.getRivoraDir(), fileName)
-            val publicFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
-            val fileToOpen = when {
-                rivoraFile.exists() -> rivoraFile
-                publicFile.exists() -> publicFile
-                else -> File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+            val chooser = Intent.createChooser(intent, "Open with").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-
-            if (fileToOpen.exists()) {
-                val contentUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", fileToOpen)
-                intent.setDataAndType(contentUri, mimeType)
-                context.startActivity(intent)
-            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to open file: ${e.message}")
+            Log.e(TAG, "Failed to open file: ${e.message}", e)
         }
     }
 }

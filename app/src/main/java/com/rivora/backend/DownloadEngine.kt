@@ -246,14 +246,14 @@ class DownloadEngine private constructor(
                 )
 
                 val currentState = _engineState.value
-                val isCurrentlyActive = currentState.activeItem != null && 
-                    currentState.activeItem.status == DownloadStatus.ACTIVE && 
-                    currentState.isDownloading
+                val hasActiveOrPaused = currentState.activeItem != null && 
+                    (currentState.activeItem.status == DownloadStatus.ACTIVE || currentState.activeItem.status == DownloadStatus.PAUSED)
 
-                if (isCurrentlyActive) {
-                    // Queue the download
+                if (hasActiveOrPaused) {
+                    // Queue the download and persist its queue entry
                     _engineState.update { it.copy(queue = it.queue + newItem) }
-                    Log.d(TAG, "Active download in progress; queued item: $uniqueFileName")
+                    RivoraPersistenceManager.saveDownloadState(newItem, emptyList())
+                    Log.d(TAG, "Active/paused download in progress; queued item: $uniqueFileName")
                 } else {
                     // Start immediately
                     executeDownloadItem(newItem, finalResumable)
@@ -277,20 +277,19 @@ class DownloadEngine private constructor(
     private suspend fun executeDownloadItem(item: DownloadItem, isResumable: Boolean) {
         val activeItem = item.copy(status = DownloadStatus.ACTIVE)
 
+        // ALWAYS clear previous in-memory chunk list so chunks from previous downloads NEVER leak
+        chunkList.clear()
+
         // Always check persistent storage for saved chunks of this specific file
         val savedChunks = RivoraPersistenceManager.loadChunks(activeItem.fileName)
-        if (savedChunks.isNotEmpty()) {
-            chunkList.clear()
+        if (savedChunks.isNotEmpty() && savedChunks.any { it.downloadedBytes > 0L }) {
             chunkList.addAll(savedChunks)
             totalBytesDownloaded.set(savedChunks.sumOf { it.downloadedBytes })
             Log.d(TAG, "Restored ${savedChunks.size} chunks for ${activeItem.fileName} (${totalBytesDownloaded.get()} bytes)")
-        } else if (chunkList.isEmpty()) {
+        } else {
             partitionChunks(activeItem.totalBytes)
             totalBytesDownloaded.set(0L)
-            Log.d(TAG, "Partitioned fresh chunks for ${activeItem.fileName}")
-        } else {
-            // Retain active chunks and calculate exact byte count
-            totalBytesDownloaded.set(chunkList.sumOf { it.downloadedBytes })
+            Log.d(TAG, "Partitioned fresh chunks for ${activeItem.fileName} (total: ${activeItem.totalBytes} bytes)")
         }
 
         val completedCount = chunkList.count { it.status == ChunkStatus.COMPLETED }
@@ -519,6 +518,12 @@ class DownloadEngine private constructor(
             }
             Log.d(TAG, "Download finished successfully: ${target.displayName}")
 
+            // Cleanly clear completed chunk state before queue transition
+            chunkList.clear()
+            totalBytesDownloaded.set(0L)
+            wifiBytesTotal.set(0L)
+            cellularBytesTotal.set(0L)
+
             // Auto-start next queued download if available!
             checkAndStartNextQueued()
         }
@@ -648,9 +653,15 @@ class DownloadEngine private constructor(
      * Checks if there are items waiting in the queue and starts the next one.
      */
     private fun checkAndStartNextQueued() {
-        val nextItem = _engineState.value.queue.firstOrNull() ?: return
+        val nextItem = _engineState.value.queue.firstOrNull() ?: run {
+            try {
+                DownloadNotificationService.stop(context)
+            } catch (_: Exception) {}
+            return
+        }
         _engineState.update { it.copy(queue = it.queue.drop(1)) }
         scope.launch {
+            delay(300)
             executeDownloadItem(nextItem, isResumable = true)
         }
     }
@@ -662,7 +673,7 @@ class DownloadEngine private constructor(
         val item = _engineState.value.queue.firstOrNull { it.id == itemId } ?: return
         // If an active download is running, put the current active download back into queue
         val currentActive = _engineState.value.activeItem
-        if (currentActive != null) {
+        if (currentActive != null && currentActive.status != DownloadStatus.FINISHED) {
             RivoraPersistenceManager.saveDownloadState(
                 item = currentActive.copy(status = DownloadStatus.QUEUED, downloadedBytes = totalBytesDownloaded.get()),
                 chunks = chunkList,
@@ -673,11 +684,14 @@ class DownloadEngine private constructor(
 
         _engineState.update { current ->
             val newQueue = current.queue.filterNot { it.id == itemId }
-            val updatedQueue = if (currentActive != null) listOf(currentActive.copy(status = DownloadStatus.QUEUED)) + newQueue else newQueue
+            val updatedQueue = if (currentActive != null && currentActive.status != DownloadStatus.FINISHED) {
+                listOf(currentActive.copy(status = DownloadStatus.QUEUED)) + newQueue
+            } else newQueue
             current.copy(queue = updatedQueue)
         }
 
         scope.launch {
+            delay(200)
             executeDownloadItem(item, isResumable = true)
         }
     }
