@@ -45,6 +45,10 @@ object RivoraPersistenceManager {
         if (!metaDir.exists()) {
             metaDir.mkdirs()
         }
+        val noMedia = File(metaDir, ".nomedia")
+        if (!noMedia.exists()) {
+            try { noMedia.createNewFile() } catch (_: Exception) {}
+        }
         return metaDir
     }
 

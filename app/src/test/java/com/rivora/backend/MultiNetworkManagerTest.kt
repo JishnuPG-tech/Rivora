@@ -54,7 +54,7 @@ class MultiNetworkManagerTest {
 
         assertNotNull(defaultClient)
         // Verify timeout configuration
-        assertEquals(15000, defaultClient.connectTimeoutMillis)
-        assertEquals(30000, defaultClient.readTimeoutMillis)
+        assertEquals(30000, defaultClient.connectTimeoutMillis)
+        assertEquals(45000, defaultClient.readTimeoutMillis)
     }
 }

@@ -479,6 +479,8 @@ class DownloadEngine private constructor(
 
                 if (!wifiConnected && !cellConnected) {
                     ensureWorkersForAdapter(NetworkAdapterType.UNKNOWN, 4)
+                } else {
+                    cancelWorkersForAdapter(NetworkAdapterType.UNKNOWN)
                 }
             }
         }
@@ -568,7 +570,12 @@ class DownloadEngine private constructor(
                     networkManager.getClient(adapterType) ?: networkManager.getDefaultClient()
                 }
 
-                val reqBuilder = Request.Builder().url(url)
+                val reqBuilder = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36")
+                    .header("Accept", "*/*")
+                    .header("Accept-Encoding", "identity")
+                    .header("Connection", "keep-alive")
                 if (isResumable && chunk.endByte > 0) {
                     val currentStart = chunk.startByte + chunk.downloadedBytes
                     reqBuilder.header("Range", "bytes=$currentStart-${chunk.endByte}")
