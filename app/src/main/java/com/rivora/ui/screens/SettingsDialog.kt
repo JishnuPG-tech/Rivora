@@ -1,8 +1,5 @@
 package com.rivora.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,13 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.SystemUpdate
@@ -45,19 +39,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.rivora.theme.RivoraColor
+import com.rivora.theme.RivoraType
 import com.rivora.ui.components.RivoraButton
 import com.rivora.ui.components.RivoraButtonVariant
 import com.rivora.ui.components.RivoraCard
 import com.rivora.ui.components.RivoraInsetBox
 import com.rivora.ui.components.RivoraSwitch
-import com.rivora.theme.RivoraColor
-import com.rivora.theme.RivoraType
 import com.rivora.updater.UpdateCheckResult
 
 /**
- * Production Settings Modal for Rivora.
- * Includes direct GitHub Releases update checking, BitTorrent protocol options,
- * and quick access to network limits.
+ * Clean, structured, professional Settings modal with short texts and perfect alignment.
  */
 @Composable
 fun SettingsDialog(
@@ -70,8 +62,8 @@ fun SettingsDialog(
     onDismiss: () -> Unit
 ) {
     var dhtEnabled by remember { mutableStateOf(true) }
-    var lsdEnabled by remember { mutableStateOf(true) }
     var trackersEnabled by remember { mutableStateOf(true) }
+    var sequentialEnabled by remember { mutableStateOf(true) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -80,54 +72,47 @@ fun SettingsDialog(
         Box(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(18.dp))
                 .background(RivoraColor.Surface)
-                .border(1.dp, RivoraColor.BorderSubtle, RoundedCornerShape(20.dp))
-                .padding(20.dp)
+                .border(1.dp, RivoraColor.BorderSubtle, RoundedCornerShape(18.dp))
+                .padding(18.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Modal Header
+                // Header: Title & Version Pill
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Settings",
-                            style = RivoraType.rivoraText(RivoraType.Sans, 20f, FontWeight.SemiBold, 0f, 24f).copy(
-                                color = RivoraColor.TextPrimary
-                            )
+                    Text(
+                        text = "Settings",
+                        style = RivoraType.rivoraText(RivoraType.Sans, 18f, FontWeight.SemiBold, 0f, 22f).copy(
+                            color = RivoraColor.TextPrimary
                         )
-                        Text(
-                            text = "Preferences & Updates",
-                            style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Normal, 0f, 16f).copy(
-                                color = RivoraColor.TextMuted
-                            )
-                        )
-                    }
+                    )
 
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(RivoraColor.BorderSubtle)
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .background(RivoraColor.SurfaceRaised)
+                            .border(1.dp, RivoraColor.BorderDefault, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = "v$currentVersion",
-                            style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Medium, 0f, 14f).copy(
+                            style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.SemiBold, 0f, 13f).copy(
                                 color = RivoraColor.OrangeBright
                             )
                         )
                     }
                 }
 
-                // 1. App Updates Section
+                // 1. App Updates
                 RivoraCard {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -135,165 +120,100 @@ fun SettingsDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
+                            modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.SystemUpdate,
-                                contentDescription = "Updates",
+                                contentDescription = null,
                                 tint = RivoraColor.Orange,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Text(
-                                text = "App Updates",
-                                style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary, fontWeight = FontWeight.SemiBold)
-                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "App Updates",
+                                    style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary, fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = when {
+                                        isCheckingUpdate -> "Checking..."
+                                        updateResult is UpdateCheckResult.UpdateAvailable -> "v${updateResult.newVersion} available"
+                                        updateResult is UpdateCheckResult.UpToDate -> "Up to date"
+                                        updateResult is UpdateCheckResult.Error -> "Check failed"
+                                        else -> "Auto-check enabled"
+                                    },
+                                    style = RivoraType.rivoraText(RivoraType.Sans, 11f, FontWeight.Normal, 0f, 14f).copy(
+                                        color = when {
+                                            updateResult is UpdateCheckResult.UpdateAvailable -> RivoraColor.OrangeBright
+                                            updateResult is UpdateCheckResult.UpToDate -> Color(0xFF10B981)
+                                            else -> RivoraColor.TextMuted
+                                        }
+                                    )
+                                )
+                            }
                         }
 
                         if (isCheckingUpdate) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(18.dp),
                                 color = RivoraColor.Orange,
                                 strokeWidth = 2.dp
                             )
-                        }
-                    }
-
-                    // Update Status Banner
-                    RivoraInsetBox(padding = 12.dp) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            when {
-                                isCheckingUpdate -> {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(
-                                            text = "Checking GitHub Releases...",
-                                            style = RivoraType.rivoraText(RivoraType.Sans, 13f, FontWeight.Normal, 0f, 16f).copy(
-                                                color = RivoraColor.TextSecondary
-                                            )
-                                        )
-                                    }
-                                }
-                                updateResult is UpdateCheckResult.UpdateAvailable -> {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(8.dp)
-                                                    .clip(CircleShape)
-                                                    .background(RivoraColor.OrangeBright)
-                                            )
-                                            Text(
-                                                text = "New version ${updateResult.newVersion} available!",
-                                                style = RivoraType.rivoraText(RivoraType.Sans, 13f, FontWeight.SemiBold, 0f, 16f).copy(
-                                                    color = RivoraColor.OrangeBright
-                                                )
-                                            )
-                                        }
-                                        RivoraButton(
-                                            text = "Install Update",
-                                            onClick = {
-                                                onDismiss()
-                                                onViewUpdate()
-                                            },
-                                            variant = RivoraButtonVariant.AMBER,
-                                            height = 36.dp,
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-                                }
-                                updateResult is UpdateCheckResult.UpToDate -> {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.CheckCircle,
-                                            contentDescription = "Up to date",
-                                            tint = Color(0xFF10B981),
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "You're on the latest version",
-                                            style = RivoraType.rivoraText(RivoraType.Sans, 13f, FontWeight.Normal, 0f, 16f).copy(
-                                                color = Color(0xFF10B981)
-                                            )
-                                        )
-                                    }
-                                }
-                                updateResult is UpdateCheckResult.Error -> {
-                                    Text(
-                                        text = updateResult.message,
-                                        style = RivoraType.rivoraText(RivoraType.Sans, 12f, FontWeight.Normal, 0f, 15f).copy(
-                                            color = RivoraColor.StreamSecondary
-                                        )
-                                    )
-                                }
-                                else -> {
-                                    Text(
-                                        text = "Rivora auto-checks for updates via GitHub Releases.",
-                                        style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Normal, 0f, 16f).copy(
-                                            color = RivoraColor.TextMuted
-                                        )
-                                    )
-                                }
-                            }
-
-                            if (!isCheckingUpdate && updateResult !is UpdateCheckResult.UpdateAvailable) {
-                                RivoraButton(
-                                    text = "Check for Updates Now",
-                                    onClick = onCheckForUpdates,
-                                    variant = RivoraButtonVariant.DARK,
-                                    height = 36.dp,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
+                        } else if (updateResult is UpdateCheckResult.UpdateAvailable) {
+                            RivoraButton(
+                                text = "Update",
+                                onClick = {
+                                    onDismiss()
+                                    onViewUpdate()
+                                },
+                                variant = RivoraButtonVariant.AMBER,
+                                height = 30.dp
+                            )
+                        } else {
+                            RivoraButton(
+                                text = "Check",
+                                onClick = onCheckForUpdates,
+                                variant = RivoraButtonVariant.DARK,
+                                height = 30.dp
+                            )
                         }
                     }
                 }
 
-                // 2. BitTorrent Protocol Settings
+                // 2. BitTorrent Protocol
                 RivoraCard {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Security,
-                            contentDescription = "BitTorrent",
+                            contentDescription = null,
                             tint = RivoraColor.Orange,
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "BitTorrent Protocol",
+                            text = "BitTorrent",
                             style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary, fontWeight = FontWeight.SemiBold)
                         )
                     }
 
-                    RivoraInsetBox(padding = 12.dp) {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    RivoraInsetBox(padding = 10.dp) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Row 1: DHT
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = "DHT Peer Discovery",
-                                        style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary)
-                                    )
-                                    Text(
-                                        text = "Find peers without centralized trackers",
-                                        style = RivoraType.rivoraText(RivoraType.Sans, 11f, FontWeight.Normal, 0f, 14f).copy(
-                                            color = RivoraColor.TextMuted
-                                        )
-                                    )
-                                }
+                                Text(
+                                    text = "DHT discovery",
+                                    style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Medium, 0f, 16f).copy(
+                                        color = RivoraColor.TextPrimary
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
                                 RivoraSwitch(
                                     checked = dhtEnabled,
                                     onCheckedChange = { dhtEnabled = it },
@@ -301,26 +221,46 @@ fun SettingsDialog(
                                 )
                             }
 
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RivoraColor.BorderSubtle))
+
+                            // Row 2: Public Trackers
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = "High-Speed Fallback Trackers",
-                                        style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary)
-                                    )
-                                    Text(
-                                        text = "Auto-inject public trackers for bare magnets",
-                                        style = RivoraType.rivoraText(RivoraType.Sans, 11f, FontWeight.Normal, 0f, 14f).copy(
-                                            color = RivoraColor.TextMuted
-                                        )
-                                    )
-                                }
+                                Text(
+                                    text = "Public trackers",
+                                    style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Medium, 0f, 16f).copy(
+                                        color = RivoraColor.TextPrimary
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
                                 RivoraSwitch(
                                     checked = trackersEnabled,
                                     onCheckedChange = { trackersEnabled = it },
+                                    activeTrackColor = RivoraColor.Orange
+                                )
+                            }
+
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(RivoraColor.BorderSubtle))
+
+                            // Row 3: Sequential mode
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Sequential mode",
+                                    style = RivoraType.rivoraText(RivoraType.Sans, 12.5f, FontWeight.Medium, 0f, 16f).copy(
+                                        color = RivoraColor.TextPrimary
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RivoraSwitch(
+                                    checked = sequentialEnabled,
+                                    onCheckedChange = { sequentialEnabled = it },
                                     activeTrackColor = RivoraColor.Orange
                                 )
                             }
@@ -328,40 +268,41 @@ fun SettingsDialog(
                     }
                 }
 
-                // 3. Network & Storage Shortcuts
-                RivoraCard {
+                // 3. Network Limits
+                RivoraCard(
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {
+                            onDismiss()
+                            onOpenLimits()
+                        }
+                    )
+                ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = {
-                                    onDismiss()
-                                    onOpenLimits()
-                                }
-                            ),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
+                            modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Speed,
-                                contentDescription = "Network Limits",
+                                contentDescription = null,
                                 tint = RivoraColor.Orange,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Column {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    text = "Network Limits & Budget",
+                                    text = "Network Limits",
                                     style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary, fontWeight = FontWeight.SemiBold)
                                 )
                                 Text(
-                                    text = "Configure cellular speed caps & data caps",
-                                    style = RivoraType.rivoraText(RivoraType.Sans, 11.5f, FontWeight.Normal, 0f, 14f).copy(
+                                    text = "Speed & data budgets",
+                                    style = RivoraType.rivoraText(RivoraType.Sans, 11f, FontWeight.Normal, 0f, 14f).copy(
                                         color = RivoraColor.TextMuted
                                     )
                                 )
@@ -369,17 +310,65 @@ fun SettingsDialog(
                         }
                         Text(
                             text = "Edit ▾",
-                            style = RivoraType.ButtonLabel.copy(color = RivoraColor.OrangeBright, fontSize = 12.sp)
+                            style = RivoraType.ButtonLabel.copy(
+                                color = RivoraColor.OrangeBright,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            softWrap = false,
+                            maxLines = 1
                         )
                     }
                 }
 
-                // Close Button
+                // 4. Storage
+                RivoraCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Folder,
+                                contentDescription = null,
+                                tint = RivoraColor.Orange,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "Download Path",
+                                    style = RivoraType.RowName.copy(color = RivoraColor.TextPrimary, fontWeight = FontWeight.SemiBold)
+                                )
+                                Text(
+                                    text = "Downloads/Rivora",
+                                    style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Normal, 0f, 14f).copy(
+                                        color = RivoraColor.TextMuted
+                                    )
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Default",
+                            style = RivoraType.rivoraText(RivoraType.Sans, 11f, FontWeight.Medium, 0f, 14f).copy(
+                                color = RivoraColor.TextDisabled
+                            ),
+                            softWrap = false,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                // Done Button
                 RivoraButton(
                     text = "Done",
                     onClick = onDismiss,
                     variant = RivoraButtonVariant.DARK,
-                    height = 42.dp,
+                    height = 38.dp,
                     modifier = Modifier.fillMaxWidth()
                 )
             }

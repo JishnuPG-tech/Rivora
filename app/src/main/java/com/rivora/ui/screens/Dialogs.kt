@@ -890,8 +890,8 @@ fun CancelDownloadConfirmDialog(
         Spacer(modifier = Modifier.height(10.dp))
 
         Text(
-          text = "Are you sure you want to permanently delete \"$fileName\"? This will remove the file from your device.",
-          style = RivoraType.rivoraText(RivoraType.Sans, 14f, FontWeight.Normal, 0f, 20f).copy(
+          text = "Delete in-progress download of \"$fileName\"? This removes the file.",
+          style = RivoraType.rivoraText(RivoraType.Sans, 13f, FontWeight.Normal, 0f, 18f).copy(
             color = Color(0xFFA1A1A8)
           )
         )
@@ -903,18 +903,18 @@ fun CancelDownloadConfirmDialog(
           horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
           RivoraButton(
-            text = "Keep Download",
+            text = "Keep",
             onClick = onDismiss,
             variant = RivoraButtonVariant.DARK,
-            height = 40.dp,
+            height = 38.dp,
             modifier = Modifier.weight(1f)
           )
 
           RivoraButton(
-            text = "Delete File",
+            text = "Delete",
             onClick = onConfirmCancel,
             variant = RivoraButtonVariant.DANGER,
-            height = 40.dp,
+            height = 38.dp,
             modifier = Modifier.weight(1f)
           )
         }
