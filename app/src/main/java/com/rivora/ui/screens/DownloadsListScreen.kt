@@ -34,6 +34,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
 import com.rivora.data.DownloadItem
 import com.rivora.data.DownloadStatus
 import com.rivora.theme.RivoraColor
@@ -60,9 +63,13 @@ fun DownloadsListScreen(
   onOpenItem: (DownloadItem) -> Unit,
   onOpenNetworks: () -> Unit,
   onOpenNewDownload: () -> Unit,
+  onOpenSettings: () -> Unit = {},
+  isWifiConnected: Boolean = true,
+  isCellularConnected: Boolean = true,
   modifier: Modifier = Modifier
 ) {
   val progress = if (activeItem.totalBytes > 0) (activeItem.downloadedBytes.toFloat() / activeItem.totalBytes).coerceIn(0f, 1f) else 0f
+  val activeNetworks = (if (isWifiConnected) 1 else 0) + (if (cellularActive && isCellularConnected) 1 else 0)
   var inlineUrlInput by remember { mutableStateOf("magnet:?xt=urn:btih:3b245504cf5f11bbdbe1201...") }
 
   Column(
@@ -100,7 +107,7 @@ fun DownloadsListScreen(
         ) {
           NetworkDot(color = RivoraColor.Orange, size = 10.dp)
           Text(
-            text = if (cellularActive) "2 networks ▾" else "1 network ▾",
+            text = when (activeNetworks) { 2 -> "2 networks ▾"; 1 -> "1 network ▾"; else -> "Offline ▾" },
             style = RivoraType.ButtonLabel.copy(color = RivoraColor.TextPrimary)
           )
         }
@@ -216,7 +223,7 @@ fun DownloadsListScreen(
             subtitle = String.format("%.1f GB of %.1f GB · %s",
               activeItem.downloadedBytes / (1024f*1024f*1024f),
               activeItem.totalBytes / (1024f*1024f*1024f),
-              if (cellularActive) "2 networks" else "1 network"
+              if (activeNetworks > 1) " networks" else " network"
             ),
             progress = progress,
             barColor = RivoraColor.Orange,

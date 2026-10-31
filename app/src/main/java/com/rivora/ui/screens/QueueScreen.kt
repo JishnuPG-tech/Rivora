@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +74,7 @@ fun QueueScreen(
   onOpenDetail: (DownloadItem) -> Unit,
   onNavigateToAdd: () -> Unit,
   onOpenNetworks: () -> Unit,
+  onOpenSettings: () -> Unit = {},
   modifier: Modifier = Modifier,
   onTogglePause: () -> Unit = {},
   onCancelActive: () -> Unit = {},
@@ -125,33 +127,60 @@ fun QueueScreen(
           )
         }
 
-        // Network Status Pill
         Row(
-          modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(RivoraColor.Surface)
-            .border(1.dp, RivoraColor.BorderDefault, RoundedCornerShape(8.dp))
-            .clickable(
-              interactionSource = remember { MutableInteractionSource() },
-              indication = null,
-              onClick = onOpenNetworks
-            )
-            .padding(horizontal = 10.dp, vertical = 6.dp),
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-          NetworkDot(
-            color = if (isWifiConnected) RivoraColor.Orange else if (isCellularConnected) RivoraColor.StreamSecondary else RivoraColor.TextDisabled,
-            size = 8.dp
-          )
-          Text(
-            text = when (activeNetworks) {
-              2 -> "2 networks ▾"
-              1 -> "1 network ▾"
-              else -> "Offline ▾"
-            },
-            style = RivoraType.ButtonLabel.copy(color = RivoraColor.TextPrimary, fontSize = 11.sp)
-          )
+          // Network Status Pill
+          Row(
+            modifier = Modifier
+              .clip(RoundedCornerShape(8.dp))
+              .background(RivoraColor.Surface)
+              .border(1.dp, RivoraColor.BorderDefault, RoundedCornerShape(8.dp))
+              .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onOpenNetworks
+              )
+              .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            NetworkDot(
+              color = if (isWifiConnected) RivoraColor.Orange else if (isCellularConnected) RivoraColor.StreamSecondary else RivoraColor.TextDisabled,
+              size = 8.dp
+            )
+            Text(
+              text = when (activeNetworks) {
+                2 -> "2 networks ▾"
+                1 -> "1 network ▾"
+                else -> "Offline ▾"
+              },
+              style = RivoraType.ButtonLabel.copy(color = RivoraColor.TextPrimary, fontSize = 11.sp)
+            )
+          }
+
+          // Settings Button
+          Box(
+            modifier = Modifier
+              .size(32.dp)
+              .clip(RoundedCornerShape(8.dp))
+              .background(RivoraColor.Surface)
+              .border(1.dp, RivoraColor.BorderDefault, RoundedCornerShape(8.dp))
+              .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onOpenSettings
+              ),
+            contentAlignment = Alignment.Center
+          ) {
+            Icon(
+              imageVector = Icons.Rounded.Settings,
+              contentDescription = "Settings",
+              tint = RivoraColor.TextSecondary,
+              modifier = Modifier.size(16.dp)
+            )
+          }
         }
       }
 
@@ -317,10 +346,12 @@ fun QueueScreen(
                 }
                 val etaInfo = if (!isPaused && etaText.isNotBlank() && etaText != "Calculating...") {
                   etaText
-                } else if (cellularActive) {
-                  "2 networks"
                 } else {
-                  "1 network"
+                  when (activeNetworks) {
+                    2 -> "2 networks"
+                    1 -> "1 network"
+                    else -> "Offline"
+                  }
                 }
                 val sizeText = "$progressText · $etaInfo"
 

@@ -34,6 +34,7 @@ data class RivoraUiState(
   val completedChunks: Int = 0,
   val totalChunks: Int = 200,
   val etaSeconds: Long = 0L,
+  val statusMessage: String? = null,
   val queue: List<DownloadItem> = emptyList(),
   val finished: List<DownloadItem> = emptyList(),
   val throughputHistory: List<Float> = List(60) { 0f }
@@ -59,6 +60,14 @@ class MainScreenViewModel : ViewModel() {
     }
   }
 
+  val isCheckingUpdate: StateFlow<Boolean> by lazy {
+    try {
+      com.rivora.updater.AppUpdateManager.getInstance().isChecking
+    } catch (_: Exception) {
+      MutableStateFlow(false)
+    }
+  }
+
   init {
     observeNetworkManager()
     observeDownloadEngine()
@@ -81,7 +90,8 @@ class MainScreenViewModel : ViewModel() {
               totalChunks = engineState.totalChunks,
               throughputHistory = engineState.throughputHistory,
               isPaused = engineState.isPaused,
-              etaSeconds = engineState.etaSeconds
+              etaSeconds = engineState.etaSeconds,
+              statusMessage = engineState.statusMessage
             )
           }
         }

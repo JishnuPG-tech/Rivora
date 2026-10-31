@@ -76,6 +76,9 @@ class AppUpdateManager private constructor(
     private val _downloadState = MutableStateFlow<UpdateDownloadState>(UpdateDownloadState.Idle)
     val downloadState: StateFlow<UpdateDownloadState> = _downloadState.asStateFlow()
 
+    private val _isChecking = MutableStateFlow(false)
+    val isChecking: StateFlow<Boolean> = _isChecking.asStateFlow()
+
     fun getCurrentVersionName(): String {
         return try {
             val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -102,6 +105,8 @@ class AppUpdateManager private constructor(
 
     fun checkForUpdates(isManual: Boolean = true) {
         scope.launch {
+            _isChecking.value = true
+            if (isManual) _checkResult.value = null
             try {
                 prefs.edit().putLong("last_check_timestamp", System.currentTimeMillis()).apply()
                 val currentVer = getCurrentVersionName()
@@ -192,6 +197,8 @@ class AppUpdateManager private constructor(
                 if (isManual) {
                     _checkResult.value = UpdateCheckResult.Error(e.message ?: "Failed to check for updates")
                 }
+            } finally {
+                _isChecking.value = false
             }
         }
     }

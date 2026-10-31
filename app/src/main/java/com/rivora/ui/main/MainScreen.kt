@@ -79,7 +79,12 @@ fun MainScreen(
   val displayCell = formattedCell.text
   val displayAvg = formattedAvg.text
   val displayPeak = formattedPeak.text
-  val etaDisplay = ByteFormatter.formatEta(state.etaSeconds)
+  val etaDisplay = when {
+    state.isPaused -> "Paused"
+    !state.statusMessage.isNullOrBlank() -> state.statusMessage!!
+    state.etaSeconds > 0L -> ByteFormatter.formatEta(state.etaSeconds)
+    else -> "Connecting..."
+  }
 
   val mult = if (state.unit == "Mbps") 8f else 1f
 
@@ -126,6 +131,7 @@ fun MainScreen(
           },
           onNavigateToAdd = { viewModel.switchView("add") },
           onOpenNetworks = { viewModel.openModal("networks") },
+          onOpenSettings = { viewModel.openModal("settings") },
           onTogglePause = { viewModel.togglePause() },
           onCancelActive = { viewModel.cancelDownload() },
           onStartQueued = { id -> viewModel.startQueuedDownload(id) },
@@ -318,6 +324,7 @@ fun MainScreen(
   // Auto-Update Dialog
   val updateResult by viewModel.updateCheckResult.collectAsStateWithLifecycle()
   val updateDownloadState by viewModel.updateDownloadState.collectAsStateWithLifecycle()
+  val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsStateWithLifecycle()
 
   (updateResult as? com.rivora.updater.UpdateCheckResult.UpdateAvailable)?.let { update ->
     com.rivora.ui.screens.UpdateDialog(
@@ -355,6 +362,20 @@ fun MainScreen(
       isCellularConnected = state.isCellularConnected
     )
     "limits" -> LimitsDialog(
+      onDismiss = { viewModel.closeModal() }
+    )
+    "settings" -> com.rivora.ui.screens.SettingsDialog(
+      currentVersion = try { com.rivora.updater.AppUpdateManager.getInstance().getCurrentVersionName() } catch (_: Exception) { "1.1.4" },
+      isCheckingUpdate = isCheckingUpdate,
+      updateResult = updateResult,
+      onCheckForUpdates = { viewModel.checkForUpdates() },
+      onViewUpdate = {
+        viewModel.closeModal()
+      },
+      onOpenLimits = {
+        viewModel.closeModal()
+        viewModel.openModal("limits")
+      },
       onDismiss = { viewModel.closeModal() }
     )
   }

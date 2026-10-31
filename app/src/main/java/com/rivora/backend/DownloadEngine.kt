@@ -55,7 +55,8 @@ data class DownloadEngineState(
     val isPaused: Boolean = false,
     val etaSeconds: Long = 0L,
     val isDownloading: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val statusMessage: String? = null
 )
 
 /**
@@ -381,7 +382,12 @@ class DownloadEngine private constructor(
         isPaused.set(false)
         isCancelled.set(false)
 
-        val torrentUrl = activeItem.downloadUrl
+        val rawTorrentUrl = activeItem.downloadUrl.trim()
+        val torrentUrl = if (rawTorrentUrl.matches(Regex("^[a-fA-F0-9]{40}$"))) {
+            "magnet:?xt=urn:btih:$rawTorrentUrl"
+        } else {
+            rawTorrentUrl
+        }
         if (torrentUrl.startsWith("magnet:", ignoreCase = true)) {
             torrentManager.downloadMagnet(torrentUrl, saveDir, activeItem.fileName)
         } else if (torrentUrl.startsWith("content://", ignoreCase = true) || torrentUrl.startsWith("file://", ignoreCase = true)) {
@@ -443,6 +449,23 @@ class DownloadEngine private constructor(
                     status = if (isComplete) DownloadStatus.FINISHED else if (model.status == com.rivora.backend.torrent.TorrentStatus.PAUSED) DownloadStatus.PAUSED else DownloadStatus.ACTIVE
                 )
 
+                val statusMsg = when {
+                    model.status == com.rivora.backend.torrent.TorrentStatus.DOWNLOADING_METADATA ->
+                        if (model.numPeers > 0) "Fetching metadata (${model.numPeers} peers)..." else "Finding peers via DHT..."
+                    model.status == com.rivora.backend.torrent.TorrentStatus.CHECKING_FILES ->
+                        "Checking files (${(model.progress * 100).toInt()}%)..."
+                    model.status == com.rivora.backend.torrent.TorrentStatus.PAUSED ->
+                        "Paused"
+                    isComplete ->
+                        "Completed"
+                    speedMBps > 0.001f ->
+                        null
+                    model.numPeers > 0 ->
+                        "${model.numPeers} peers connected"
+                    else ->
+                        "Searching for peers..."
+                }
+
                 _engineState.update { current ->
                     val newHistory = current.throughputHistory.drop(1) + speedMBps
                     current.copy(
@@ -454,7 +477,8 @@ class DownloadEngine private constructor(
                         wifiSpeedMBps = speedMBps,
                         cellularSpeedMBps = 0f,
                         throughputHistory = newHistory,
-                        etaSeconds = model.etaSeconds
+                        etaSeconds = model.etaSeconds,
+                        statusMessage = statusMsg
                     )
                 }
 

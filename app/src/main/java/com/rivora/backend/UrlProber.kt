@@ -70,11 +70,16 @@ object UrlProber {
      */
     suspend fun probe(url: String, context: android.content.Context? = null): ProbeResult = withContext(Dispatchers.IO) {
         val trimmedUrl = url.trim()
+        val effectiveUrl = if (trimmedUrl.matches(Regex("^[a-fA-F0-9]{40}$"))) {
+            "magnet:?xt=urn:btih:"
+        } else {
+            trimmedUrl
+        }
 
-        if (trimmedUrl.startsWith("magnet:", ignoreCase = true)) {
-            val name = extractMagnetDisplayName(trimmedUrl)
+        if (effectiveUrl.startsWith("magnet:", ignoreCase = true)) {
+            val name = extractMagnetDisplayName(effectiveUrl)
             return@withContext ProbeResult(
-                url = trimmedUrl,
+                url = effectiveUrl,
                 fileName = name,
                 fileExtension = name.substringAfterLast('.', "TORRENT").uppercase(),
                 totalBytes = 0L,
@@ -463,6 +468,7 @@ object UrlProber {
         return trimmed.startsWith("magnet:", ignoreCase = true) ||
                trimmed.endsWith(".torrent", ignoreCase = true) ||
                trimmed.startsWith("content://", ignoreCase = true) ||
-               trimmed.startsWith("file://", ignoreCase = true)
+               trimmed.startsWith("file://", ignoreCase = true) ||
+               trimmed.matches(Regex("^[a-fA-F0-9]{40}$"))
     }
 }
