@@ -35,6 +35,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     MultiNetworkManager.getInstance(this).startMonitoring()
     DownloadEngine.getInstance(this)
+    com.rivora.updater.AppUpdateManager.getInstance(this).checkForUpdatesOnStartup()
 
     enableEdgeToEdge()
     setContent {

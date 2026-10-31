@@ -49,6 +49,9 @@ kotlin {
 }
 
 dependencies {
+  implementation("org.libtorrent4j:libtorrent4j:2.1.0-34")
+  implementation("org.libtorrent4j:libtorrent4j-android-arm64:2.1.0-34")
+
   val composeBom = platform(libs.androidx.compose.bom)
   implementation(composeBom)
   androidTestImplementation(composeBom)

@@ -315,6 +315,22 @@ fun MainScreen(
   }
 }
 
+  // Auto-Update Dialog
+  val updateResult by viewModel.updateCheckResult.collectAsStateWithLifecycle()
+  val updateDownloadState by viewModel.updateDownloadState.collectAsStateWithLifecycle()
+
+  (updateResult as? com.rivora.updater.UpdateCheckResult.UpdateAvailable)?.let { update ->
+    com.rivora.ui.screens.UpdateDialog(
+      currentVersion = update.currentVersion,
+      newVersion = update.newVersion,
+      release = update.release,
+      downloadState = updateDownloadState,
+      onStartDownload = { viewModel.startDownloadUpdate(update.release) },
+      onInstallApk = { file -> viewModel.installUpdateApk(file) },
+      onDismiss = { viewModel.dismissUpdate() }
+    )
+  }
+
   // Modals & Dialog Overlays
   when (state.activeModal) {
     "newdl" -> NewDownloadDialog(

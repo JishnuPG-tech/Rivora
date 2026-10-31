@@ -10,8 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlin.math.cos
-import kotlin.math.sin
 
 data class RivoraUiState(
   val currentView: String = "queue", // "queue" | "add" | "detail"
@@ -44,6 +42,22 @@ data class RivoraUiState(
 class MainScreenViewModel : ViewModel() {
   private val _uiState = MutableStateFlow(RivoraUiState())
   val uiState: StateFlow<RivoraUiState> = _uiState.asStateFlow()
+
+  val updateCheckResult: StateFlow<com.rivora.updater.UpdateCheckResult?> by lazy {
+    try {
+      com.rivora.updater.AppUpdateManager.getInstance().checkResult
+    } catch (_: Exception) {
+      MutableStateFlow(null)
+    }
+  }
+
+  val updateDownloadState: StateFlow<com.rivora.updater.UpdateDownloadState> by lazy {
+    try {
+      com.rivora.updater.AppUpdateManager.getInstance().downloadState
+    } catch (_: Exception) {
+      MutableStateFlow(com.rivora.updater.UpdateDownloadState.Idle)
+    }
+  }
 
   init {
     observeNetworkManager()
@@ -98,6 +112,30 @@ class MainScreenViewModel : ViewModel() {
         // Ignored in preview or test
       }
     }
+  }
+
+  fun checkForUpdates() {
+    try {
+      com.rivora.updater.AppUpdateManager.getInstance().checkForUpdates(isManual = true)
+    } catch (_: Exception) {}
+  }
+
+  fun startDownloadUpdate(release: com.rivora.updater.GitHubRelease) {
+    try {
+      com.rivora.updater.AppUpdateManager.getInstance().startDownloadUpdate(release)
+    } catch (_: Exception) {}
+  }
+
+  fun installUpdateApk(file: java.io.File) {
+    try {
+      com.rivora.updater.AppUpdateManager.getInstance().installApk(file)
+    } catch (_: Exception) {}
+  }
+
+  fun dismissUpdate() {
+    try {
+      com.rivora.updater.AppUpdateManager.getInstance().dismissUpdate()
+    } catch (_: Exception) {}
   }
 
   fun switchView(view: String) {

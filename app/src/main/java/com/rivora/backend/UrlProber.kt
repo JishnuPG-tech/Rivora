@@ -68,7 +68,7 @@ object UrlProber {
      * Verifies whether the link represents a valid downloadable file (movie, video, audio, archive, executable, torrent, etc.)
      * or an HTML web page, checking HTTP headers, content-disposition, MIME types, and file extensions.
      */
-    suspend fun probe(url: String): ProbeResult = withContext(Dispatchers.IO) {
+    suspend fun probe(url: String, context: android.content.Context? = null): ProbeResult = withContext(Dispatchers.IO) {
         val trimmedUrl = url.trim()
 
         if (trimmedUrl.startsWith("magnet:", ignoreCase = true)) {
@@ -86,12 +86,25 @@ object UrlProber {
         }
 
         if (trimmedUrl.startsWith("content://", ignoreCase = true) || trimmedUrl.startsWith("file://", ignoreCase = true)) {
-            val name = fallbackFileNameFromUrl(trimmedUrl)
+            var name = fallbackFileNameFromUrl(trimmedUrl)
+            var totalBytes = 0L
+            try {
+                if (context != null) {
+                    val uri = android.net.Uri.parse(trimmedUrl)
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val ti = org.libtorrent4j.TorrentInfo(bytes)
+                        name = ti.name()
+                        totalBytes = ti.totalSize()
+                    }
+                }
+            } catch (_: Exception) {}
+
             return@withContext ProbeResult(
                 url = trimmedUrl,
                 fileName = name,
                 fileExtension = name.substringAfterLast('.', "TORRENT").uppercase(),
-                totalBytes = 0L,
+                totalBytes = totalBytes,
                 isResumable = true,
                 contentType = "application/x-bittorrent",
                 isDownloadable = true,
@@ -443,5 +456,13 @@ object UrlProber {
         val xtRegex = """xt=urn:btih:([a-zA-Z0-9]+)""".toRegex(RegexOption.IGNORE_CASE)
         val xtMatch = xtRegex.find(magnetUri)
         return xtMatch?.groupValues?.get(1)?.let { "torrent_$it" } ?: "torrent_download"
+    }
+
+    fun isTorrentUrl(url: String): Boolean {
+        val trimmed = url.trim()
+        return trimmed.startsWith("magnet:", ignoreCase = true) ||
+               trimmed.endsWith(".torrent", ignoreCase = true) ||
+               trimmed.startsWith("content://", ignoreCase = true) ||
+               trimmed.startsWith("file://", ignoreCase = true)
     }
 }

@@ -91,6 +91,7 @@ class DownloadEngine private constructor(
     }
 
     private val networkManager = MultiNetworkManager.getInstance(context)
+    private val torrentManager = com.rivora.backend.torrent.TorrentManager.getInstance(context)
 
     private val _engineState = MutableStateFlow(DownloadEngineState())
     val engineState: StateFlow<DownloadEngineState> = _engineState.asStateFlow()
@@ -279,6 +280,11 @@ class DownloadEngine private constructor(
     private suspend fun executeDownloadItem(item: DownloadItem, isResumable: Boolean) {
         val activeItem = item.copy(status = DownloadStatus.ACTIVE)
 
+        if (UrlProber.isTorrentUrl(activeItem.downloadUrl)) {
+            executeTorrentDownload(activeItem)
+            return
+        }
+
         // Clear previous in-memory chunk list if switching items or fresh start
         if (chunkList.isEmpty() || _engineState.value.activeItem?.id != activeItem.id) {
             chunkList.clear()
@@ -345,6 +351,145 @@ class DownloadEngine private constructor(
 
         // Launch concurrent download workers directly
         runDownloadWorkers(activeItem.downloadUrl, activeItem.totalBytes, isResumable)
+    }
+
+    private suspend fun executeTorrentDownload(item: DownloadItem) {
+        val activeItem = item.copy(status = DownloadStatus.ACTIVE)
+        chunkList.clear()
+        for (i in 0 until DEFAULT_CHUNKS_COUNT) {
+            chunkList.add(ChunkProgress(index = i, startByte = i.toLong(), endByte = (i + 1).toLong()))
+        }
+
+        _engineState.update {
+            it.copy(
+                activeItem = activeItem,
+                isDownloading = true,
+                isPaused = false,
+                error = null,
+                completedChunks = 0,
+                totalChunks = DEFAULT_CHUNKS_COUNT
+            )
+        }
+
+        try {
+            DownloadNotificationService.start(context)
+        } catch (_: Exception) {}
+
+        val saveDir = RivoraPersistenceManager.getRivoraDir()
+        saveDir.mkdirs()
+
+        isPaused.set(false)
+        isCancelled.set(false)
+
+        val torrentUrl = activeItem.downloadUrl
+        if (torrentUrl.startsWith("magnet:", ignoreCase = true)) {
+            torrentManager.downloadMagnet(torrentUrl, saveDir, activeItem.fileName)
+        } else if (torrentUrl.startsWith("content://", ignoreCase = true) || torrentUrl.startsWith("file://", ignoreCase = true)) {
+            try {
+                val uri = Uri.parse(torrentUrl)
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    torrentManager.downloadTorrentBytes(bytes, saveDir)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to read torrent bytes: " + e.message)
+            }
+        } else if (torrentUrl.startsWith("http://", ignoreCase = true) || torrentUrl.startsWith("https://", ignoreCase = true)) {
+            scope.launch {
+                try {
+                    val req = Request.Builder().url(torrentUrl).build()
+                    val res = networkManager.getDefaultClient().newCall(req).execute()
+                    res.use { r ->
+                        val bytes = r.body?.bytes()
+                        if (bytes != null && bytes.isNotEmpty()) {
+                            torrentManager.downloadTorrentBytes(bytes, saveDir)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed downloading .torrent URL: " + e.message)
+                }
+            }
+        }
+
+        activeJob?.cancel()
+        activeJob = scope.launch {
+            torrentManager.activeTorrent.collect { model ->
+                if (model == null) return@collect
+                val isComplete = model.status == com.rivora.backend.torrent.TorrentStatus.FINISHED ||
+                        (model.totalBytes > 0 && model.downloadedBytes >= model.totalBytes)
+
+                val completedChunksCount = if (model.piecesCount > 0) {
+                    ((model.piecesCompleted.toFloat() / model.piecesCount) * DEFAULT_CHUNKS_COUNT).toInt().coerceIn(0, DEFAULT_CHUNKS_COUNT)
+                } else if (model.progress > 0f) {
+                    (model.progress * DEFAULT_CHUNKS_COUNT).toInt().coerceIn(0, DEFAULT_CHUNKS_COUNT)
+                } else 0
+
+                for (i in 0 until DEFAULT_CHUNKS_COUNT) {
+                    if (i < completedChunksCount) {
+                        chunkList[i].status = ChunkStatus.COMPLETED
+                    } else if (i == completedChunksCount) {
+                        chunkList[i].status = ChunkStatus.DOWNLOADING
+                    } else {
+                        chunkList[i].status = ChunkStatus.PENDING
+                    }
+                }
+
+                val speedMBps = model.downloadRateMBps
+                val currentActive = _engineState.value.activeItem
+                val updatedActive = currentActive?.copy(
+                    fileName = if (model.name.isNotBlank()) model.name else currentActive.fileName,
+                    totalBytes = if (model.totalBytes > 0) model.totalBytes else currentActive.totalBytes,
+                    downloadedBytes = model.downloadedBytes,
+                    status = if (isComplete) DownloadStatus.FINISHED else if (model.status == com.rivora.backend.torrent.TorrentStatus.PAUSED) DownloadStatus.PAUSED else DownloadStatus.ACTIVE
+                )
+
+                _engineState.update { current ->
+                    val newHistory = current.throughputHistory.drop(1) + speedMBps
+                    current.copy(
+                        activeItem = updatedActive,
+                        isDownloading = !isComplete && model.status != com.rivora.backend.torrent.TorrentStatus.PAUSED,
+                        isPaused = model.status == com.rivora.backend.torrent.TorrentStatus.PAUSED,
+                        completedChunks = if (isComplete) DEFAULT_CHUNKS_COUNT else completedChunksCount,
+                        totalChunks = DEFAULT_CHUNKS_COUNT,
+                        wifiSpeedMBps = speedMBps,
+                        cellularSpeedMBps = 0f,
+                        throughputHistory = newHistory,
+                        etaSeconds = model.etaSeconds
+                    )
+                }
+
+                if (isComplete) {
+                    val finishedFile = File(saveDir, model.name)
+                    try {
+                        if (finishedFile.exists()) {
+                            android.media.MediaScannerConnection.scanFile(
+                                context,
+                                arrayOf(finishedFile.absolutePath),
+                                arrayOf(DownloadStorageHelper.getMimeType(model.name)),
+                                null
+                            )
+                        }
+                    } catch (_: Exception) {}
+                    if (updatedActive != null) {
+                        val finishedItem = updatedActive.copy(status = DownloadStatus.FINISHED)
+                        RivoraPersistenceManager.saveDownloadState(finishedItem, chunkList, finishedFile)
+                        _engineState.update { curr ->
+                            curr.copy(
+                                isDownloading = false,
+                                activeItem = finishedItem,
+                                finished = listOf(finishedItem) + curr.finished.filterNot { it.id == finishedItem.id },
+                                completedChunks = DEFAULT_CHUNKS_COUNT,
+                                wifiSpeedMBps = 0f,
+                                cellularSpeedMBps = 0f,
+                                etaSeconds = 0
+                            )
+                        }
+                    }
+                    checkAndStartNextQueued()
+                    return@collect
+                }
+            }
+        }
     }
 
     private fun partitionChunks(totalBytes: Long) {
@@ -759,6 +904,9 @@ class DownloadEngine private constructor(
      * Pause the active download and save its persistent backup state immediately.
      */
     fun pauseDownload() {
+        if (_engineState.value.activeItem?.downloadUrl?.let { UrlProber.isTorrentUrl(it) } == true) {
+            torrentManager.pause()
+        }
         if (!isPaused.get()) {
             isPaused.set(true)
             smoothedWifiSpeedMBps = 0f
@@ -805,6 +953,9 @@ class DownloadEngine private constructor(
      * Resume a paused download. Spawns workers cleanly to resume right where the download left off.
      */
     fun resumeDownload() {
+        if (_engineState.value.activeItem?.downloadUrl?.let { UrlProber.isTorrentUrl(it) } == true) {
+            torrentManager.resume()
+        }
         val active = _engineState.value.activeItem ?: return
         isPaused.set(false)
         isCancelled.set(false)
@@ -840,6 +991,9 @@ class DownloadEngine private constructor(
      * and delete its persistent backup state.
      */
     fun cancelDownload() {
+        if (_engineState.value.activeItem?.downloadUrl?.let { UrlProber.isTorrentUrl(it) } == true) {
+            torrentManager.cancel()
+        }
         isCancelled.set(true)
         isPaused.set(false)
         stopActiveDownloadOnly()
