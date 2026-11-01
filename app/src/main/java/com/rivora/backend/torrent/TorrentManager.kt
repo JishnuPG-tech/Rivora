@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - Automatic injection of high-speed public fallback trackers to resolve bare magnets in seconds.
  * - Local and remote .torrent file decoding.
  * - Sequential media piece downloading mode.
- * - Real-time piece availability & completion bitmap telemetry.
+ * - Safe boundary-checked bitfield & piece availability telemetry (no JNI crashes).
  * - Seamless integration with Rivora's DownloadEngine & ChunkMatrixCanvas.
  */
 class TorrentManager private constructor(
@@ -100,54 +100,61 @@ class TorrentManager private constructor(
                         override fun types(): IntArray? = null
 
                         override fun alert(alert: Alert<*>) {
-                            val torrentAlert = alert as? TorrentAlert<*>
-                            val handle = torrentAlert?.handle()
-                            if (handle != null && handle.isValid) {
-                                activeHandle = handle
-                            }
+                            try {
+                                val torrentAlert = alert as? TorrentAlert<*>
+                                val handle = torrentAlert?.handle()
+                                if (handle != null && handle.isValid) {
+                                    activeHandle = handle
+                                }
 
-                            when (alert.type()) {
-                                AlertType.METADATA_RECEIVED -> {
-                                    val metaAlert = alert as? MetadataReceivedAlert
-                                    val h = metaAlert?.handle()
-                                    if (h != null && h.isValid) {
-                                        Log.d(TAG, "Metadata received for torrent: " + (alert.torrentName() ?: ""))
-                                        activeHandle = h
-                                        updateTorrentModel(h)
-                                    }
-                                }
-                                AlertType.ADD_TORRENT -> {
-                                    val addAlert = alert as? AddTorrentAlert
-                                    val h = addAlert?.handle()
-                                    if (h != null && h.isValid) {
-                                        Log.d(TAG, "Torrent added to session: " + (alert.torrentName() ?: ""))
-                                        activeHandle = h
-                                        try {
-                                            FALLBACK_TRACKERS.forEach { tr ->
-                                                h.addTracker(AnnounceEntry(tr))
-                                            }
-                                            h.resume()
-                                        } catch (_: Exception) {}
-                                        updateTorrentModel(h)
-                                    }
-                                }
-                                AlertType.TORRENT_FINISHED -> {
-                                    val finishAlert = alert as? TorrentFinishedAlert
-                                    val h = finishAlert?.handle()
-                                    if (h != null && h.isValid) {
-                                        Log.d(TAG, "Torrent finished: " + (alert.torrentName() ?: ""))
-                                        activeHandle = h
-                                        updateTorrentModel(h)
-                                        val current = _activeTorrent.value
-                                        if (current != null) {
-                                            onFinishedCallback?.invoke(current.copy(status = LocalTorrentStatus.FINISHED))
+                                when (alert.type()) {
+                                    AlertType.METADATA_RECEIVED -> {
+                                        val metaAlert = alert as? MetadataReceivedAlert
+                                        val h = metaAlert?.handle()
+                                        if (h != null && h.isValid) {
+                                            val tName = try { torrentAlert?.torrentName() ?: "" } catch (_: Throwable) { "" }
+                                            Log.d(TAG, "Metadata received for torrent: $tName")
+                                            activeHandle = h
+                                            updateTorrentModel(h)
                                         }
                                     }
+                                    AlertType.ADD_TORRENT -> {
+                                        val addAlert = alert as? AddTorrentAlert
+                                        val h = addAlert?.handle()
+                                        if (h != null && h.isValid) {
+                                            val tName = try { torrentAlert?.torrentName() ?: "" } catch (_: Throwable) { "" }
+                                            Log.d(TAG, "Torrent added to session: $tName")
+                                            activeHandle = h
+                                            try {
+                                                FALLBACK_TRACKERS.forEach { tr ->
+                                                    try { h.addTracker(AnnounceEntry(tr)) } catch (_: Throwable) {}
+                                                }
+                                                h.resume()
+                                            } catch (_: Throwable) {}
+                                            updateTorrentModel(h)
+                                        }
+                                    }
+                                    AlertType.TORRENT_FINISHED -> {
+                                        val finishAlert = alert as? TorrentFinishedAlert
+                                        val h = finishAlert?.handle()
+                                        if (h != null && h.isValid) {
+                                            val tName = try { torrentAlert?.torrentName() ?: "" } catch (_: Throwable) { "" }
+                                            Log.d(TAG, "Torrent finished: $tName")
+                                            activeHandle = h
+                                            updateTorrentModel(h)
+                                            val current = _activeTorrent.value
+                                            if (current != null) {
+                                                onFinishedCallback?.invoke(current.copy(status = LocalTorrentStatus.FINISHED))
+                                            }
+                                        }
+                                    }
+                                    AlertType.TORRENT_ERROR -> {
+                                        Log.w(TAG, "Torrent error alert: " + (try { alert.message() } catch (_: Throwable) { "error" }))
+                                    }
+                                    else -> {}
                                 }
-                                AlertType.TORRENT_ERROR -> {
-                                    Log.w(TAG, "Torrent error alert: " + alert.message())
-                                }
-                                else -> {}
+                            } catch (t: Throwable) {
+                                Log.w(TAG, "Unhandled exception in libtorrent alert: " + t.message, t)
                             }
                         }
                     })
@@ -168,8 +175,8 @@ class TorrentManager private constructor(
                     isSessionRunning.set(true)
                     Log.d(TAG, "BitTorrent SessionManager successfully initialized with DHT/PEX.")
 
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start BitTorrent session: " + e.message, e)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Failed to start BitTorrent session: " + t.message, t)
                 }
             }
         }
@@ -209,6 +216,22 @@ class TorrentManager private constructor(
                 ensureSessionStarted()
                 saveDir.mkdirs()
 
+                // Check if already registered in session
+                if (infoHash.isNotBlank()) {
+                    try {
+                        val existing = sessionManager.find(Sha1Hash.parseHex(infoHash))
+                        if (existing != null && existing.isValid) {
+                            activeHandle = existing
+                            FALLBACK_TRACKERS.forEach { tr ->
+                                try { existing.addTracker(AnnounceEntry(tr)) } catch (_: Throwable) {}
+                            }
+                            existing.resume()
+                            startTelemetryPoll()
+                            return@launch
+                        }
+                    } catch (_: Throwable) {}
+                }
+
                 val enrichedMagnet = appendTrackersIfMissing(magnetUri)
                 val flags = TorrentFlags.AUTO_MANAGED
                 sessionManager.download(enrichedMagnet, saveDir, flags)
@@ -221,15 +244,15 @@ class TorrentManager private constructor(
                         if (handle != null && handle.isValid) {
                             activeHandle = handle
                             FALLBACK_TRACKERS.forEach { tr ->
-                                handle.addTracker(AnnounceEntry(tr))
+                                try { handle.addTracker(AnnounceEntry(tr)) } catch (_: Throwable) {}
                             }
                             handle.resume()
                         }
-                    } catch (_: Exception) {}
+                    } catch (_: Throwable) {}
                 }
                 startTelemetryPoll()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error downloading magnet: " + e.message, e)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error downloading magnet: " + t.message, t)
             }
         }
         return initialModel
@@ -268,26 +291,30 @@ class TorrentManager private constructor(
                     if (handle != null && handle.isValid) {
                         activeHandle = handle
                         FALLBACK_TRACKERS.forEach { tr ->
-                            handle.addTracker(AnnounceEntry(tr))
+                            try { handle.addTracker(AnnounceEntry(tr)) } catch (_: Throwable) {}
                         }
                         handle.resume()
                     }
-                } catch (_: Exception) {}
+                } catch (_: Throwable) {}
                 startTelemetryPoll()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error downloading torrent info: " + e.message, e)
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error downloading torrent info: " + t.message, t)
             }
         }
         return initialModel
     }
 
     fun pause() {
-        activeHandle?.pause()
+        try {
+            activeHandle?.pause()
+        } catch (_: Throwable) {}
         _activeTorrent.value = _activeTorrent.value?.copy(status = LocalTorrentStatus.PAUSED)
     }
 
     fun resume() {
-        activeHandle?.resume()
+        try {
+            activeHandle?.resume()
+        } catch (_: Throwable) {}
         _activeTorrent.value = _activeTorrent.value?.copy(status = LocalTorrentStatus.DOWNLOADING)
     }
 
@@ -305,8 +332,8 @@ class TorrentManager private constructor(
                         if (file.exists()) file.deleteRecursively()
                     }
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Error removing torrent: " + e.message)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Error removing torrent: " + t.message)
             }
         }
         activeHandle = null
@@ -315,13 +342,15 @@ class TorrentManager private constructor(
 
     fun setSequentialDownload(sequential: Boolean) {
         val handle = activeHandle ?: return
-        if (handle.isValid) {
-            if (sequential) {
-                handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
-            } else {
-                handle.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+        try {
+            if (handle.isValid) {
+                if (sequential) {
+                    handle.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+                } else {
+                    handle.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+                }
             }
-        }
+        } catch (_: Throwable) {}
     }
 
     private fun startTelemetryPoll() {
@@ -329,31 +358,36 @@ class TorrentManager private constructor(
         pollJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(500)
-                var handle = activeHandle
-                if (handle == null || !handle.isValid) {
-                    val currentHash = _activeTorrent.value?.infoHash
-                    if (!currentHash.isNullOrBlank()) {
-                        try {
-                            val found = sessionManager.find(Sha1Hash.parseHex(currentHash))
-                            if (found != null && found.isValid) {
-                                handle = found
-                                activeHandle = found
-                            }
-                        } catch (_: Exception) {}
-                    }
+                try {
+                    if (!sessionManager.isRunning) continue
+                    var handle = activeHandle
                     if (handle == null || !handle.isValid) {
-                        try {
-                            val list = sessionManager.swig().get_torrents()
-                            if (list.isNotEmpty()) {
-                                handle = TorrentHandle(list[0])
-                                activeHandle = handle
-                            }
-                        } catch (_: Exception) {}
+                        val currentHash = _activeTorrent.value?.infoHash
+                        if (!currentHash.isNullOrBlank()) {
+                            try {
+                                val found = sessionManager.find(Sha1Hash.parseHex(currentHash))
+                                if (found != null && found.isValid) {
+                                    handle = found
+                                    activeHandle = found
+                                }
+                            } catch (_: Throwable) {}
+                        }
+                        if (handle == null || !handle.isValid) {
+                            try {
+                                val list = sessionManager.swig().get_torrents()
+                                if (list.isNotEmpty()) {
+                                    handle = TorrentHandle(list[0])
+                                    activeHandle = handle
+                                }
+                            } catch (_: Throwable) {}
+                        }
                     }
-                }
 
-                if (handle != null && handle.isValid) {
-                    updateTorrentModel(handle)
+                    if (handle != null && handle.isValid) {
+                        updateTorrentModel(handle)
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Error in telemetry poll: " + t.message)
                 }
             }
         }
@@ -361,67 +395,84 @@ class TorrentManager private constructor(
 
     private fun updateTorrentModel(handle: TorrentHandle) {
         try {
-            val status = handle.status()
-            val totalBytes = if (status.total() > 0) status.total() else status.totalWanted()
-            val totalDone = status.totalDone()
-            val downRate = status.downloadPayloadRate() / (1024f * 1024f)
-            val upRate = status.uploadPayloadRate() / (1024f * 1024f)
+            if (!handle.isValid) return
+            val status = try { handle.status() } catch (_: Throwable) { null } ?: return
+            val totalBytes = try {
+                if (status.total() > 0) status.total() else status.totalWanted()
+            } catch (_: Throwable) { 0L }
+            val totalDone = try { status.totalDone() } catch (_: Throwable) { 0L }
+            val downRate = try { (status.downloadPayloadRate() / (1024f * 1024f)).coerceAtLeast(0f) } catch (_: Throwable) { 0f }
+            val upRate = try { (status.uploadPayloadRate() / (1024f * 1024f)).coerceAtLeast(0f) } catch (_: Throwable) { 0f }
 
-            val piecesCount = status.numPieces()
-            val piecesBitfield = status.pieces()
+            val piecesCount = try { status.numPieces().coerceAtLeast(0) } catch (_: Throwable) { 0 }
+            val piecesBitfield = try { status.pieces() } catch (_: Throwable) { null }
             var piecesCompleted = 0
             val bitmap = BooleanArray(piecesCount)
-            if (piecesBitfield != null) {
-                for (i in 0 until piecesCount) {
-                    val bit = piecesBitfield.getBit(i)
+            if (piecesBitfield != null && piecesCount > 0) {
+                val bitfieldSize = try { piecesBitfield.size() } catch (_: Throwable) { 0 }
+                val limit = minOf(piecesCount, bitfieldSize)
+                for (i in 0 until limit) {
+                    val bit = try { piecesBitfield.getBit(i) } catch (_: Throwable) { false }
                     bitmap[i] = bit
                     if (bit) piecesCompleted++
                 }
             }
 
             val etaSec = if (downRate > 0.001f && totalBytes > totalDone) {
-                ((totalBytes - totalDone) / (downRate * 1024f * 1024f)).toLong()
+                ((totalBytes - totalDone) / (downRate * 1024f * 1024f)).toLong().coerceAtLeast(0L)
             } else 0L
 
-            val isPaused = status.flags().and_(TorrentFlags.PAUSED).non_zero()
+            val isPaused = try { status.flags().and_(TorrentFlags.PAUSED).non_zero() } catch (_: Throwable) { false }
+            val stateVal = try { status.state() } catch (_: Throwable) { null }
+            val isFinished = try { status.isFinished } catch (_: Throwable) { false }
+            val isSeeding = try { status.isSeeding } catch (_: Throwable) { false }
+
             val torrentStatus = when {
-                status.isFinished || status.isSeeding -> LocalTorrentStatus.FINISHED
+                isFinished || isSeeding -> LocalTorrentStatus.FINISHED
                 isPaused -> LocalTorrentStatus.PAUSED
-                status.state() == org.libtorrent4j.TorrentStatus.State.CHECKING_FILES ||
-                status.state() == org.libtorrent4j.TorrentStatus.State.CHECKING_RESUME_DATA -> LocalTorrentStatus.CHECKING_FILES
-                status.state() == org.libtorrent4j.TorrentStatus.State.DOWNLOADING_METADATA -> LocalTorrentStatus.DOWNLOADING_METADATA
-                status.state() == org.libtorrent4j.TorrentStatus.State.DOWNLOADING -> LocalTorrentStatus.DOWNLOADING
+                stateVal == org.libtorrent4j.TorrentStatus.State.CHECKING_FILES ||
+                stateVal == org.libtorrent4j.TorrentStatus.State.CHECKING_RESUME_DATA -> LocalTorrentStatus.CHECKING_FILES
+                stateVal == org.libtorrent4j.TorrentStatus.State.DOWNLOADING_METADATA -> LocalTorrentStatus.DOWNLOADING_METADATA
+                stateVal == org.libtorrent4j.TorrentStatus.State.DOWNLOADING -> LocalTorrentStatus.DOWNLOADING
                 else -> LocalTorrentStatus.DOWNLOADING
             }
 
             val currentModel = _activeTorrent.value
-            val name = status.name().ifBlank { currentModel?.name ?: ("torrent_" + handle.infoHash().toHex()) }
+            val infoHashHex = try { handle.infoHash()?.toHex() ?: "" } catch (_: Throwable) { "" }
+            val rawName = try { status.name() } catch (_: Throwable) { null }
+            val name = if (!rawName.isNullOrBlank()) {
+                rawName
+            } else {
+                currentModel?.name ?: (if (infoHashHex.isNotBlank()) "torrent_$infoHashHex" else "torrent_download")
+            }
+
+            val savePath = try { handle.savePath() ?: "" } catch (_: Throwable) { "" }
 
             val updated = TorrentInfoModel(
-                infoHash = handle.infoHash().toHex(),
+                infoHash = infoHashHex,
                 name = name,
                 totalBytes = totalBytes,
                 downloadedBytes = totalDone,
-                uploadedBytes = status.totalPayloadUpload(),
+                uploadedBytes = try { status.totalPayloadUpload() } catch (_: Throwable) { 0L },
                 downloadRateMBps = downRate,
                 uploadRateMBps = upRate,
-                numPeers = status.numPeers(),
-                numSeeds = status.numSeeds(),
-                totalPeers = status.listPeers(),
-                totalSeeds = status.listSeeds(),
-                progress = status.progress(),
+                numPeers = try { status.numPeers().coerceAtLeast(0) } catch (_: Throwable) { 0 },
+                numSeeds = try { status.numSeeds().coerceAtLeast(0) } catch (_: Throwable) { 0 },
+                totalPeers = try { status.listPeers().coerceAtLeast(0) } catch (_: Throwable) { 0 },
+                totalSeeds = try { status.listSeeds().coerceAtLeast(0) } catch (_: Throwable) { 0 },
+                progress = try { status.progress().coerceIn(0f, 1f) } catch (_: Throwable) { 0f },
                 status = torrentStatus,
                 etaSeconds = etaSec,
                 piecesCount = piecesCount,
                 piecesCompleted = piecesCompleted,
                 piecesBitmap = bitmap,
-                savePath = handle.savePath()
+                savePath = savePath
             )
 
             _activeTorrent.value = updated
 
-        } catch (e: Exception) {
-            Log.w(TAG, "Error reading torrent telemetry: " + e.message)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error reading torrent telemetry: " + t.message, t)
         }
     }
 

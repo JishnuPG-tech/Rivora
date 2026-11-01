@@ -101,7 +101,7 @@ class DownloadEngine private constructor(
     private var telemetryJob: Job? = null
     private var currentStorageTarget: StorageTarget? = null
 
-    private val chunkList = mutableListOf<ChunkProgress>()
+    private val chunkList = java.util.concurrent.CopyOnWriteArrayList<ChunkProgress>()
     private val isPaused = AtomicBoolean(false)
     private val isCancelled = AtomicBoolean(false)
     private val isCellularEnabled = AtomicBoolean(true)
@@ -165,8 +165,8 @@ class DownloadEngine private constructor(
                     )
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to restore persisted downloads: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to restore persisted downloads: ${t.message}", t)
         }
     }
 
@@ -376,7 +376,18 @@ class DownloadEngine private constructor(
             DownloadNotificationService.start(context)
         } catch (_: Exception) {}
 
-        val saveDir = RivoraPersistenceManager.getRivoraDir()
+        val saveDir = try {
+            val publicDir = RivoraPersistenceManager.getRivoraDir()
+            if (publicDir.canWrite() || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R || android.os.Environment.isExternalStorageManager()) {
+                publicDir
+            } else {
+                val appExt = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+                File(appExt, "Rivora").apply { mkdirs() }
+            }
+        } catch (_: Throwable) {
+            val appExt = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+            File(appExt, "Rivora").apply { mkdirs() }
+        }
         saveDir.mkdirs()
 
         isPaused.set(false)
@@ -431,12 +442,14 @@ class DownloadEngine private constructor(
                 } else 0
 
                 for (i in 0 until DEFAULT_CHUNKS_COUNT) {
-                    if (i < completedChunksCount) {
-                        chunkList[i].status = ChunkStatus.COMPLETED
-                    } else if (i == completedChunksCount) {
-                        chunkList[i].status = ChunkStatus.DOWNLOADING
-                    } else {
-                        chunkList[i].status = ChunkStatus.PENDING
+                    if (i < chunkList.size) {
+                        if (i < completedChunksCount) {
+                            chunkList[i].status = ChunkStatus.COMPLETED
+                        } else if (i == completedChunksCount) {
+                            chunkList[i].status = ChunkStatus.DOWNLOADING
+                        } else {
+                            chunkList[i].status = ChunkStatus.PENDING
+                        }
                     }
                 }
 

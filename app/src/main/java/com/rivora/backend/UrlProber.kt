@@ -71,7 +71,7 @@ object UrlProber {
     suspend fun probe(url: String, context: android.content.Context? = null): ProbeResult = withContext(Dispatchers.IO) {
         val trimmedUrl = url.trim()
         val effectiveUrl = if (trimmedUrl.matches(Regex("^[a-fA-F0-9]{40}$"))) {
-            "magnet:?xt=urn:btih:"
+            "magnet:?xt=urn:btih:$trimmedUrl"
         } else {
             trimmedUrl
         }

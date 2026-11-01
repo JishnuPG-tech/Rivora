@@ -78,7 +78,7 @@ fun ChunkMatrixCanvas(
 
     val gapPx = with(density) { gap.toPx() }
     val cellPx = floor((constraints.maxWidth - gapPx * (cols - 1)) / cols)
-    val totalHeightDp = with(density) { (cellPx * rows + gapPx * (rows - 1)).toDp() }
+    val totalHeightDp = with(density) { maxOf(0f, cellPx * rows + gapPx * (rows - 1)).toDp() }
 
     Canvas(
       modifier = Modifier
