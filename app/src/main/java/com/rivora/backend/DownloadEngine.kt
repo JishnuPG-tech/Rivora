@@ -425,8 +425,10 @@ class DownloadEngine private constructor(
 
         activeJob?.cancel()
         activeJob = scope.launch {
-            torrentManager.activeTorrent.collect { model ->
-                if (model == null) return@collect
+            try {
+                torrentManager.activeTorrent.collect { model ->
+                    try {
+                        if (model == null) return@collect
                 val isComplete = model.status == com.rivora.backend.torrent.TorrentStatus.FINISHED ||
                         (model.totalBytes > 0 && model.downloadedBytes >= model.totalBytes)
 
@@ -449,6 +451,17 @@ class DownloadEngine private constructor(
                 }
 
                 val speedMBps = model.downloadRateMBps
+                totalBytesDownloaded.set(model.downloadedBytes)
+
+                val isWifi = networkManager.isNetworkConnected(NetworkAdapterType.WIFI)
+                val isCell = networkManager.isNetworkConnected(NetworkAdapterType.CELLULAR)
+                val (wSpeed, cSpeed) = when {
+                    isWifi && isCell -> (speedMBps * 0.5f) to (speedMBps * 0.5f)
+                    isWifi -> speedMBps to 0f
+                    isCell -> 0f to speedMBps
+                    else -> speedMBps to 0f
+                }
+
                 val currentActive = _engineState.value.activeItem
                 val updatedActive = currentActive?.copy(
                     fileName = if (model.name.isNotBlank()) model.name else currentActive.fileName,
@@ -484,8 +497,8 @@ class DownloadEngine private constructor(
                         isPaused = model.status == com.rivora.backend.torrent.TorrentStatus.PAUSED,
                         completedChunks = if (isComplete) DEFAULT_CHUNKS_COUNT else completedChunksCount,
                         totalChunks = DEFAULT_CHUNKS_COUNT,
-                        wifiSpeedMBps = speedMBps,
-                        cellularSpeedMBps = 0f,
+                        wifiSpeedMBps = wSpeed,
+                        cellularSpeedMBps = cSpeed,
                         throughputHistory = newHistory,
                         etaSeconds = model.etaSeconds,
                         statusMessage = statusMsg
@@ -522,6 +535,12 @@ class DownloadEngine private constructor(
                     checkAndStartNextQueued()
                     return@collect
                 }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Error in torrent model collector: " + t.message)
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Error in activeJob torrent collector: " + t.message)
             }
         }
     }
@@ -1131,6 +1150,13 @@ class DownloadEngine private constructor(
 
                 val isDownloading = _engineState.value.isDownloading
                 val isPausedVal = isPaused.get()
+
+                val activeItemForTel = _engineState.value.activeItem
+                if (activeItemForTel != null && UrlProber.isTorrentUrl(activeItemForTel.downloadUrl)) {
+                    // Torrent download has its own dedicated, high-precision telemetry collector.
+                    // Do not overwrite torrent speed/ETA with 0 HTTP bytes!
+                    continue
+                }
 
                 if (isDownloading && !isPausedVal) {
                     val rawWifi = ((wifiDelta / dtSec) / (1024f * 1024f)).coerceAtLeast(0f)

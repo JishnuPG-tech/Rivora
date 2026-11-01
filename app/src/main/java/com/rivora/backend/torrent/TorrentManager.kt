@@ -172,6 +172,11 @@ class TorrentManager private constructor(
                     settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
                     settings.setInteger(settings_pack.int_types.active_seeds.swigValue(), 1)
                     settings.setInteger(settings_pack.int_types.active_limit.swigValue(), 5)
+                    settings.setInteger(settings_pack.int_types.disk_write_mode.swigValue(), settings_pack.mmap_write_mode_t.always_pwrite.swigValue())
+                    settings.setInteger(settings_pack.int_types.mmap_file_size_cutoff.swigValue(), 0)
+                    settings.setInteger(settings_pack.int_types.max_queued_disk_bytes.swigValue(), 16 * 1024 * 1024)
+                    settings.setInteger(settings_pack.int_types.file_pool_size.swigValue(), 40)
+                    settings.setInteger(settings_pack.int_types.aio_threads.swigValue(), 4)
                     settings.setString(settings_pack.string_types.user_agent.swigValue(), "Rivora/1.1.4 (Android)")
                     settings.setDhtBootstrapNodes("dht.libtorrent.org:25401,router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881")
 
@@ -377,15 +382,7 @@ class TorrentManager private constructor(
                                 }
                             } catch (_: Throwable) {}
                         }
-                        if (handle == null || !handle.isValid) {
-                            try {
-                                val list = sessionManager.swig().get_torrents()
-                                if (list.isNotEmpty()) {
-                                    handle = TorrentHandle(list[0])
-                                    activeHandle = handle
-                                }
-                            } catch (_: Throwable) {}
-                        }
+
                     }
 
                     if (handle != null && handle.isValid) {

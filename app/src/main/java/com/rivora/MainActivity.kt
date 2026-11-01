@@ -33,6 +33,17 @@ class MainActivity : ComponentActivity() {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
+    
+    val origHandler = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+      android.util.Log.e("RivoraCrash", "FATAL CRASH on thread ${thread.name}: ${throwable.message}", throwable)
+      try {
+        val crashFile = java.io.File(getExternalFilesDir(null) ?: filesDir, "crash.log")
+        crashFile.writeText("Crash on ${thread.name}: ${throwable.stackTraceToString()}\n")
+      } catch (_: Throwable) {}
+      origHandler?.uncaughtException(thread, throwable)
+    }
+
     MultiNetworkManager.getInstance(this).startMonitoring()
     DownloadEngine.getInstance(this)
     com.rivora.updater.AppUpdateManager.getInstance(this).checkForUpdatesOnStartup()

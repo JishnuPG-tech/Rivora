@@ -1,5 +1,7 @@
 package com.rivora.backend
 
+import android.util.Log
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -41,6 +43,7 @@ class DownloadNotificationService : Service() {
     }
 
     companion object {
+        const val TAG = "DownloadNotifService"
         const val CHANNEL_ID = "rivora_downloads_channel"
         const val CHANNEL_NAME = "Rivora Downloads"
         const val NOTIFICATION_ID = 1001
@@ -125,21 +128,25 @@ class DownloadNotificationService : Service() {
     }
 
     private fun startForegroundWithInitialNotification() {
-        val notification = buildDownloadNotification(
-            title = "Rivora Download",
-            content = "Preparing high-speed download...",
-            progress = 0,
-            isIndeterminate = true,
-            isPaused = false
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        try {
+            val notification = buildDownloadNotification(
+                title = "Rivora Download",
+                content = "Preparing high-speed download...",
+                progress = 0,
+                isIndeterminate = true,
+                isPaused = false
             )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to start foreground service: " + t.message)
         }
     }
 
@@ -149,7 +156,7 @@ class DownloadNotificationService : Service() {
             val engine = DownloadEngine.getInstance(this@DownloadNotificationService)
             engine.engineState.collect { state ->
                 val active = state.activeItem
-                if (active != null && active.status == DownloadStatus.ACTIVE) {
+                if (active != null && (active.status == DownloadStatus.ACTIVE || active.status == DownloadStatus.PAUSED)) {
                     val progress = if (active.totalBytes > 0) {
                         ((active.downloadedBytes.toFloat() / active.totalBytes) * 100).toInt().coerceIn(0, 100)
                     } else 0
@@ -173,7 +180,7 @@ class DownloadNotificationService : Service() {
                         notificationManager.notify(NOTIFICATION_ID, notification)
                     }
 
-                } else if (!state.isDownloading && state.queue.isEmpty()) {
+                } else if (!state.isDownloading && state.queue.isEmpty() && state.activeItem == null) {
                     // Check if there was a finished download to display
                     val latestFinished = state.finished.firstOrNull()
                     if (latestFinished != null && latestFinished.status == DownloadStatus.FINISHED) {
