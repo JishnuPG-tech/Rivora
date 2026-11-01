@@ -29,6 +29,16 @@ import kotlinx.coroutines.launch
  * Displays real-time progress, speed, ETA, and Pause/Resume/Cancel quick actions.
  */
 class DownloadNotificationService : Service() {
+    private var cachedLargeIcon: android.graphics.Bitmap? = null
+    private var lastNotifyTime: Long = 0L
+
+    private fun getCachedLargeIcon(): android.graphics.Bitmap? {
+        return cachedLargeIcon ?: try {
+            BitmapFactory.decodeResource(resources, R.drawable.rivora_logo).also { cachedLargeIcon = it }
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     companion object {
         const val CHANNEL_ID = "rivora_downloads_channel"
@@ -150,14 +160,18 @@ class DownloadNotificationService : Service() {
                     val etaText = if (state.etaSeconds > 0) " · ${ByteFormatter.formatEta(state.etaSeconds)}" else ""
                     val contentText = if (state.isPaused) "Paused · $sizeText" else "$speedStr · $sizeText$etaText"
 
-                    val notification = buildDownloadNotification(
-                        title = active.fileName,
-                        content = contentText,
-                        progress = progress,
-                        isIndeterminate = active.totalBytes <= 0,
-                        isPaused = state.isPaused
-                    )
-                    notificationManager.notify(NOTIFICATION_ID, notification)
+                    val now = System.currentTimeMillis()
+                    if (now - lastNotifyTime >= 1000L || progress == 100 || state.isPaused) {
+                        lastNotifyTime = now
+                        val notification = buildDownloadNotification(
+                            title = active.fileName,
+                            content = contentText,
+                            progress = progress,
+                            isIndeterminate = active.totalBytes <= 0,
+                            isPaused = state.isPaused
+                        )
+                        notificationManager.notify(NOTIFICATION_ID, notification)
+                    }
 
                 } else if (!state.isDownloading && state.queue.isEmpty()) {
                     // Check if there was a finished download to display
@@ -212,7 +226,7 @@ class DownloadNotificationService : Service() {
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.rivora_logo))
+            .setLargeIcon(getCachedLargeIcon())
             .setContentTitle(title)
             .setContentText(content)
             .setContentIntent(appPendingIntent)
@@ -251,7 +265,7 @@ class DownloadNotificationService : Service() {
 
         val completeNotification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.rivora_logo))
+            .setLargeIcon(getCachedLargeIcon())
             .setContentTitle("Download Complete")
             .setContentText(fileName)
             .setContentIntent(appPendingIntent)

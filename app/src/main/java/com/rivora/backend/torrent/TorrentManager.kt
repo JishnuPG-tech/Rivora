@@ -97,7 +97,12 @@ class TorrentManager private constructor(
             if (!sessionManager.isRunning) {
                 try {
                     sessionManager.addListener(object : AlertListener {
-                        override fun types(): IntArray? = null
+                        override fun types(): IntArray = intArrayOf(
+                            AlertType.METADATA_RECEIVED.swig(),
+                            AlertType.TORRENT_FINISHED.swig(),
+                            AlertType.TORRENT_ERROR.swig(),
+                            AlertType.ADD_TORRENT.swig()
+                        )
 
                         override fun alert(alert: Alert<*>) {
                             try {
@@ -163,10 +168,10 @@ class TorrentManager private constructor(
                     val settings = sp.settings
                     settings.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
                     settings.setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true)
-                    settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 200)
-                    settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 10)
-                    settings.setInteger(settings_pack.int_types.active_seeds.swigValue(), 4)
-                    settings.setInteger(settings_pack.int_types.active_limit.swigValue(), 15)
+                    settings.setInteger(settings_pack.int_types.connections_limit.swigValue(), 60)
+                    settings.setInteger(settings_pack.int_types.active_downloads.swigValue(), 4)
+                    settings.setInteger(settings_pack.int_types.active_seeds.swigValue(), 1)
+                    settings.setInteger(settings_pack.int_types.active_limit.swigValue(), 5)
                     settings.setString(settings_pack.string_types.user_agent.swigValue(), "Rivora/1.1.4 (Android)")
                     settings.setDhtBootstrapNodes("dht.libtorrent.org:25401,router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881")
 
@@ -405,18 +410,10 @@ class TorrentManager private constructor(
             val upRate = try { (status.uploadPayloadRate() / (1024f * 1024f)).coerceAtLeast(0f) } catch (_: Throwable) { 0f }
 
             val piecesCount = try { status.numPieces().coerceAtLeast(0) } catch (_: Throwable) { 0 }
-            val piecesBitfield = try { status.pieces() } catch (_: Throwable) { null }
-            var piecesCompleted = 0
-            val bitmap = BooleanArray(piecesCount)
-            if (piecesBitfield != null && piecesCount > 0) {
-                val bitfieldSize = try { piecesBitfield.size() } catch (_: Throwable) { 0 }
-                val limit = minOf(piecesCount, bitfieldSize)
-                for (i in 0 until limit) {
-                    val bit = try { piecesBitfield.getBit(i) } catch (_: Throwable) { false }
-                    bitmap[i] = bit
-                    if (bit) piecesCompleted++
-                }
-            }
+            val piecesCompleted = if (piecesCount > 0 && totalBytes > 0) {
+                ((totalDone.toDouble() / totalBytes.toDouble()) * piecesCount).toInt().coerceIn(0, piecesCount)
+            } else 0
+            val bitmap = BooleanArray(0)
 
             val etaSec = if (downRate > 0.001f && totalBytes > totalDone) {
                 ((totalBytes - totalDone) / (downRate * 1024f * 1024f)).toLong().coerceAtLeast(0L)

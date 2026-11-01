@@ -1,5 +1,7 @@
 package com.rivora.backend
 
+import com.rivora.util.ByteFormatter
+
 import android.content.Context
 import android.net.Uri
 import android.util.Log
@@ -377,18 +379,11 @@ class DownloadEngine private constructor(
         } catch (_: Exception) {}
 
         val saveDir = try {
-            val publicDir = RivoraPersistenceManager.getRivoraDir()
-            if (publicDir.canWrite() || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R || android.os.Environment.isExternalStorageManager()) {
-                publicDir
-            } else {
-                val appExt = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
-                File(appExt, "Rivora").apply { mkdirs() }
-            }
-        } catch (_: Throwable) {
             val appExt = context.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
             File(appExt, "Rivora").apply { mkdirs() }
+        } catch (_: Throwable) {
+            File(context.filesDir, "Rivora").apply { mkdirs() }
         }
-        saveDir.mkdirs()
 
         isPaused.set(false)
         isCancelled.set(false)
@@ -463,16 +458,18 @@ class DownloadEngine private constructor(
                 )
 
                 val statusMsg = when {
+                    isComplete ->
+                        "Completed"
+                    model.status == com.rivora.backend.torrent.TorrentStatus.PAUSED ->
+                        "Paused"
                     model.status == com.rivora.backend.torrent.TorrentStatus.DOWNLOADING_METADATA ->
                         if (model.numPeers > 0) "Fetching metadata (${model.numPeers} peers)..." else "Finding peers via DHT..."
                     model.status == com.rivora.backend.torrent.TorrentStatus.CHECKING_FILES ->
                         "Checking files (${(model.progress * 100).toInt()}%)..."
-                    model.status == com.rivora.backend.torrent.TorrentStatus.PAUSED ->
-                        "Paused"
-                    isComplete ->
-                        "Completed"
-                    speedMBps > 0.001f ->
-                        null
+                    speedMBps > 0.02f -> {
+                        val etaStr = if (model.etaSeconds > 0L) ByteFormatter.formatEta(model.etaSeconds) else null
+                        if (etaStr != null) "Downloading · $etaStr" else "Downloading (${model.numPeers} peers)"
+                    }
                     model.numPeers > 0 ->
                         "${model.numPeers} peers connected"
                     else ->

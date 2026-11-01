@@ -83,6 +83,7 @@ fun MainScreen(
     state.isPaused -> "Paused"
     !state.statusMessage.isNullOrBlank() -> state.statusMessage!!
     state.etaSeconds > 0L -> ByteFormatter.formatEta(state.etaSeconds)
+    (state.activeItem != null && !state.isPaused) -> "Downloading..."
     else -> "Connecting..."
   }
 
