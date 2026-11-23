@@ -371,7 +371,7 @@ fun MainScreen(
       onDismiss = { viewModel.closeModal() }
     )
     "settings" -> com.rivora.ui.screens.SettingsDialog(
-      currentVersion = try { com.rivora.updater.AppUpdateManager.getInstance().getCurrentVersionName() } catch (_: Exception) { "1.1.4" },
+      currentVersion = try { com.rivora.updater.AppUpdateManager.getInstance().getCurrentVersionName() } catch (_: Exception) { "1.1.5" },
       isCheckingUpdate = isCheckingUpdate,
       updateResult = updateResult,
       onCheckForUpdates = { viewModel.checkForUpdates() },
