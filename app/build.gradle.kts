@@ -10,12 +10,23 @@ android {
     defaultConfig {
         applicationId = "com.rivora"
         minSdk = 24
-        targetSdk = 36
-        versionCode = 7
-        versionName = "1.1.5"
+        targetSdk = 35
+        versionCode = 8
+        versionName = "1.1.6"
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("debug")

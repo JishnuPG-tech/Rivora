@@ -327,13 +327,13 @@ fun MainScreen(
   }
 }
 
-  // Auto-Update Dialog
+  // Full-Page Software Update Screen
   val updateResult by viewModel.updateCheckResult.collectAsStateWithLifecycle()
   val updateDownloadState by viewModel.updateDownloadState.collectAsStateWithLifecycle()
   val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsStateWithLifecycle()
 
   (updateResult as? com.rivora.updater.UpdateCheckResult.UpdateAvailable)?.let { update ->
-    com.rivora.ui.screens.UpdateDialog(
+    com.rivora.ui.screens.UpdateScreen(
       currentVersion = update.currentVersion,
       newVersion = update.newVersion,
       release = update.release,
@@ -371,7 +371,7 @@ fun MainScreen(
       onDismiss = { viewModel.closeModal() }
     )
     "settings" -> com.rivora.ui.screens.SettingsDialog(
-      currentVersion = try { com.rivora.updater.AppUpdateManager.getInstance().getCurrentVersionName() } catch (_: Exception) { "1.1.5" },
+      currentVersion = try { com.rivora.updater.AppUpdateManager.getInstance().getCurrentVersionName() } catch (_: Exception) { "1.1.6" },
       isCheckingUpdate = isCheckingUpdate,
       updateResult = updateResult,
       onCheckForUpdates = { viewModel.checkForUpdates() },

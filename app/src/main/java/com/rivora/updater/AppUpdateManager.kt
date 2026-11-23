@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import android.util.Log
 import androidx.core.content.FileProvider
@@ -209,7 +210,10 @@ class AppUpdateManager private constructor(
             try {
                 _downloadState.value = UpdateDownloadState.Downloading(0, 0L, asset.sizeBytes)
 
-                val updateDir = File(context.cacheDir, "updates").apply { mkdirs() }
+                val baseDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    ?: context.externalCacheDir
+                    ?: File(context.filesDir, "updates")
+                val updateDir = File(baseDir, "updates").apply { mkdirs() }
                 val targetFile = File(updateDir, asset.name)
                 if (targetFile.exists()) targetFile.delete()
 
@@ -235,7 +239,7 @@ class AppUpdateManager private constructor(
                             while (input.read(buffer).also { readBytes = it } != -1) {
                                 output.write(buffer, 0, readBytes)
                                 downloaded += readBytes
-                                val percent = if (total > 0L) ((downloaded * 100) / total).toInt() else 0
+                                val percent = if (total > 0L) ((downloaded * 100) / total).toInt().coerceIn(0, 100) else 0
                                 if (percent != lastPercent) {
                                     lastPercent = percent
                                     _downloadState.value = UpdateDownloadState.Downloading(percent, downloaded, total)
@@ -245,6 +249,9 @@ class AppUpdateManager private constructor(
                         }
                     }
                 }
+
+                // Ensure file has world-read access for the system package installer service
+                targetFile.setReadable(true, false)
 
                 _downloadState.value = UpdateDownloadState.ReadyToInstall(targetFile, release)
                 installApk(targetFile)
@@ -258,10 +265,13 @@ class AppUpdateManager private constructor(
 
     fun installApk(apkFile: File) {
         try {
-            if (!apkFile.exists()) {
-                Log.w(TAG, "Cannot install APK: file does not exist: ${apkFile.absolutePath}")
+            if (!apkFile.exists() || apkFile.length() == 0L) {
+                Log.w(TAG, "Cannot install APK: file is missing or empty: ${apkFile.absolutePath}")
+                _downloadState.value = UpdateDownloadState.Failed("Downloaded APK is missing or empty")
                 return
             }
+
+            apkFile.setReadable(true, false)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (!context.packageManager.canRequestPackageInstalls()) {
@@ -282,7 +292,24 @@ class AppUpdateManager private constructor(
 
             val installIntent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+
+            val resolveInfoList = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.queryIntentActivities(
+                    installIntent,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.queryIntentActivities(installIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            }
+            for (resolveInfo in resolveInfoList) {
+                val packageName = resolveInfo.activityInfo.packageName
+                context.grantUriPermission(packageName, apkUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
             context.startActivity(installIntent)
