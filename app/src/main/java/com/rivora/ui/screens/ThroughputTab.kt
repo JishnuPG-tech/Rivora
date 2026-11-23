@@ -44,6 +44,7 @@ fun ThroughputTab(
   cellularSpeedText: String,
   wifiSpeedMBps: Float = 0f,
   cellularSpeedMBps: Float = 0f,
+  wifiActive: Boolean = true,
   cellularActive: Boolean,
   avgSpeedText: String,
   peakSpeedText: String,
@@ -58,9 +59,10 @@ fun ThroughputTab(
   isCellularConnected: Boolean = true
 ) {
   val isCellActive = isCellularConnected && cellularActive
-  val isDual = isWifiConnected && isCellActive
+  val isWifiAct = isWifiConnected && wifiActive
+  val isDual = isWifiAct && isCellActive
 
-  val wifiSpd = if (isWifiConnected) wifiSpeedMBps else 0f
+  val wifiSpd = if (isWifiAct) wifiSpeedMBps else 0f
   val cellSpd = if (isCellActive) cellularSpeedMBps else 0f
   val totalSpd = wifiSpd + cellSpd
 
@@ -88,7 +90,7 @@ fun ThroughputTab(
       wifiSharePercent = 0
       cellSharePercent = if (cellSpd > 0.05f) 100 else 0
     }
-    isWifiConnected -> {
+    isWifiAct -> {
       wifiRatio = if (wifiSpd > 0.05f) 1f else 0f
       cellRatio = 0f
       wifiSharePercent = if (wifiSpd > 0.05f) 100 else 0
@@ -244,13 +246,16 @@ fun ThroughputTab(
       // Wi-Fi Contribution Row (Rendered ONLY if Wi-Fi is actively connected)
       if (isWifiConnected) {
         InterfaceSplitRow(
-          dotColor = RivoraColor.Orange,
+          dotColor = if (isWifiAct) RivoraColor.Orange else RivoraColor.TextDisabled,
           name = "Wi-Fi",
-          interfaceInfo = "$wifiInterface · ${if (wifiStreams > 0) "$wifiStreams streams" else "idle"}",
-          speedText = wifiSpeedText,
-          sharePercentText = "$wifiSharePercent%",
-          shareRatio = wifiRatio,
-          barColor = RivoraColor.Orange
+          interfaceInfo = when {
+            isWifiAct -> "$wifiInterface · ${if (wifiStreams > 0) "$wifiStreams streams" else "idle"}"
+            else -> "$wifiInterface · disabled"
+          },
+          speedText = if (isWifiAct) wifiSpeedText else "0.0 $unitText",
+          sharePercentText = if (isWifiAct) "$wifiSharePercent%" else "0%",
+          shareRatio = if (isWifiAct) wifiRatio else 0f,
+          barColor = if (isWifiAct) RivoraColor.Orange else RivoraColor.TextDisabled
         )
       }
 

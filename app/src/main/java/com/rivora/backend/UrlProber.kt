@@ -67,13 +67,33 @@ object UrlProber {
      * Probes a remote URL using a lightweight byte-range request.
      * Verifies whether the link represents a valid downloadable file (movie, video, audio, archive, executable, torrent, etc.)
      * or an HTML web page, checking HTTP headers, content-disposition, MIME types, and file extensions.
+     * Automatically resolves landing pages, HTML meta-refreshes, and client-side JavaScript redirects (e.g. flashfilez / FileToLink).
      */
-    suspend fun probe(url: String, context: android.content.Context? = null): ProbeResult = withContext(Dispatchers.IO) {
+    suspend fun probe(url: String, context: android.content.Context? = null, depth: Int = 0): ProbeResult = withContext(Dispatchers.IO) {
         val trimmedUrl = url.trim()
         val effectiveUrl = if (trimmedUrl.matches(Regex("^[a-fA-F0-9]{40}$"))) {
             "magnet:?xt=urn:btih:$trimmedUrl"
         } else {
             trimmedUrl
+        }
+
+        if (depth > 2) {
+            return@withContext ProbeResult(
+                url = effectiveUrl,
+                fileName = fallbackFileNameFromUrl(effectiveUrl),
+                fileExtension = "FILE",
+                totalBytes = 0L,
+                isResumable = false,
+                isDownloadable = false,
+                isSuccess = false,
+                errorMessage = "Too many redirects"
+            )
+        }
+
+        // 1. Instant resolution for known landing portals (flashfilez.github.io, FileToLink, etc.)
+        val resolvedSpecial = resolveSpecialLandingUrl(effectiveUrl)
+        if (resolvedSpecial != null && resolvedSpecial != effectiveUrl) {
+            return@withContext probe(resolvedSpecial, context, depth = depth + 1)
         }
 
         if (effectiveUrl.startsWith("magnet:", ignoreCase = true)) {
@@ -143,7 +163,7 @@ object UrlProber {
 
             client.newCall(rangeRequest).execute().use { response ->
                 if (response.isSuccessful || response.code == 206) {
-                    return@withContext parseResponse(trimmedUrl, response, rangeSent = true)
+                    return@withContext parseResponse(trimmedUrl, response, rangeSent = true, depth = depth)
                 }
             }
 
@@ -156,7 +176,7 @@ object UrlProber {
 
             client.newCall(fallbackRequest).execute().use { response ->
                 if (response.isSuccessful) {
-                    return@withContext parseResponse(trimmedUrl, response, rangeSent = false)
+                    return@withContext parseResponse(trimmedUrl, response, rangeSent = false, depth = depth)
                 } else {
                     val errorMsg = formatHttpError(response.code, response.message)
                     return@withContext ProbeResult(
@@ -185,10 +205,33 @@ object UrlProber {
         }
     }
 
-    private fun parseResponse(url: String, response: Response, rangeSent: Boolean): ProbeResult {
+    private suspend fun parseResponse(url: String, response: Response, rangeSent: Boolean, depth: Int = 0): ProbeResult {
         val code = response.code
         val headers = response.headers
         val finalUrl = response.request.url.toString()
+
+        val rawContentType = headers["Content-Type"]
+        val cleanContentType = rawContentType?.substringBefore(';')?.trim()?.lowercase() ?: ""
+
+        val isHtmlContentType = cleanContentType == "text/html" ||
+            cleanContentType == "application/xhtml+xml" ||
+            cleanContentType == "text/vnd.wap.wml" ||
+            cleanContentType == "application/vnd.wap.xhtml+xml"
+
+        // Auto-resolve HTML landing pages (meta refresh, window.location, FileToLink redirects)
+        if (isHtmlContentType && depth < 2) {
+            val bodySnippet = try {
+                response.peekBody(65536L).string()
+            } catch (_: Exception) {
+                null
+            }
+            if (!bodySnippet.isNullOrBlank()) {
+                val redirectTarget = extractHtmlRedirectUrl(bodySnippet, finalUrl)
+                if (!redirectTarget.isNullOrBlank() && redirectTarget != finalUrl && redirectTarget != url) {
+                    return probe(redirectTarget, depth = depth + 1)
+                }
+            }
+        }
 
         val isResumable = (code == 206) || headers["Accept-Ranges"]?.contains("bytes", ignoreCase = true) == true
         var totalBytes = -1L
@@ -216,9 +259,6 @@ object UrlProber {
         val dispositionFileName = parseContentDisposition(contentDisposition)
         val urlPathFileName = extractUrlPathFileName(finalUrl)
 
-        val rawContentType = headers["Content-Type"]
-        val cleanContentType = rawContentType?.substringBefore(';')?.trim()?.lowercase() ?: ""
-
         // Resolve best file name
         val resolvedFileName = dispositionFileName
             ?: urlPathFileName
@@ -228,11 +268,6 @@ object UrlProber {
         val extensionDisplay = resolvedExt.uppercase().let {
             if (it.isNotBlank() && it.length <= 6) it else inferExtension(cleanContentType)
         }
-
-        val isHtmlContentType = cleanContentType == "text/html" ||
-            cleanContentType == "application/xhtml+xml" ||
-            cleanContentType == "text/vnd.wap.wml" ||
-            cleanContentType == "application/vnd.wap.xhtml+xml"
 
         val isWebPageExt = WEB_PAGE_EXTENSIONS.contains(resolvedExt)
         val isDownloadableExt = DOWNLOADABLE_EXTENSIONS.contains(resolvedExt)
@@ -470,5 +505,96 @@ object UrlProber {
                trimmed.startsWith("content://", ignoreCase = true) ||
                trimmed.startsWith("file://", ignoreCase = true) ||
                trimmed.matches(Regex("^[a-fA-F0-9]{40}$"))
+    }
+    /**
+     * Instantly maps known landing portals and download forwarders to direct binary streams.
+     * E.g. flashfilez.github.io/f/?id=...&file=... -> https://Jishnupg-FileToLink.hf.space/f/.../...
+     */
+    fun resolveSpecialLandingUrl(urlStr: String): String? {
+        return try {
+            val httpUrl = urlStr.toHttpUrlOrNull() ?: return null
+            val host = httpUrl.host.lowercase()
+
+            // 1. flashfilez.github.io or FileToLink web portal links
+            if (host.contains("flashfilez.github.io") || host.contains("filetolink")) {
+                val id = httpUrl.queryParameter("id") ?: httpUrl.queryParameter("hash")
+                val file = httpUrl.queryParameter("file") ?: httpUrl.queryParameter("name")
+                if (!id.isNullOrBlank()) {
+                    val cleanFile = file?.trim() ?: "download"
+                    val encodedFile = java.net.URLEncoder.encode(cleanFile, StandardCharsets.UTF_8.name())
+                        .replace("+", "%20")
+                    return "https://Jishnupg-FileToLink.hf.space/f/$id/$encodedFile"
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Inspects HTML body snippets for meta refresh directives, client-side JS redirects (window.location),
+     * and dynamic download link scripts (such as Hugging Face / backendHost scripts).
+     */
+    private fun extractHtmlRedirectUrl(html: String, baseUrl: String): String? {
+        return try {
+            // 1. Check <meta http-equiv="refresh" content="...;url=...">
+            val metaRegex = """<meta[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*content\s*=\s*["']?[^"'>]*url=([^"'>\s]+)""".toRegex(RegexOption.IGNORE_CASE)
+            val metaMatch = metaRegex.find(html)
+            if (metaMatch != null) {
+                val target = metaMatch.groupValues[1].trim('\'', '"', ' ')
+                return resolveRelativeUrl(baseUrl, target)
+            }
+
+            // 2. Check window.location.replace("...") or window.location.href = "..." or location.href = "..."
+            val jsLocationRegex = """(?:window\.)?location(?:\.replace|\.assign|\.href\s*=)\s*\(\s*["']([^"']+)["']\s*\)|(?:window\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE)
+            val jsMatch = jsLocationRegex.find(html)
+            if (jsMatch != null) {
+                val target = (jsMatch.groups[1]?.value ?: jsMatch.groups[2]?.value)?.trim()
+                if (!target.isNullOrBlank() && !target.startsWith("javascript:", ignoreCase = true)) {
+                    return resolveRelativeUrl(baseUrl, target)
+                }
+            }
+
+            // 3. Hugging Face / backendHost scripts:
+            // const backendHost = "https://Jishnupg-FileToLink.hf.space";
+            val backendHostRegex = """(?:backendHost|host|server)\s*=\s*["'](https?://[^"']+)["']""".toRegex(RegexOption.IGNORE_CASE)
+            val hostMatch = backendHostRegex.find(html)
+            if (hostMatch != null) {
+                val backendHost = hostMatch.groupValues[1].trimEnd('/')
+                val baseHttp = baseUrl.toHttpUrlOrNull()
+                val id = baseHttp?.queryParameter("id") ?: baseHttp?.queryParameter("hash")
+                val file = baseHttp?.queryParameter("file") ?: baseHttp?.queryParameter("name")
+                if (!id.isNullOrBlank()) {
+                    val cleanFile = file?.trim() ?: "download"
+                    val encodedFile = java.net.URLEncoder.encode(cleanFile, StandardCharsets.UTF_8.name())
+                        .replace("+", "%20")
+                    return "$backendHost/f/$id/$encodedFile"
+                }
+            }
+
+            // 4. Download anchor tags: <a ... href="..." download>
+            val downloadAnchorRegex = """<a\s+[^>]*href=["']([^"']+)["'][^>]*download""".toRegex(RegexOption.IGNORE_CASE)
+            val anchorMatch = downloadAnchorRegex.find(html)
+            if (anchorMatch != null) {
+                val target = anchorMatch.groupValues[1].trim()
+                if (!target.startsWith("#") && !target.startsWith("javascript:", ignoreCase = true)) {
+                    return resolveRelativeUrl(baseUrl, target)
+                }
+            }
+
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun resolveRelativeUrl(baseUrl: String, relativeOrAbsolute: String): String {
+        return try {
+            val base = baseUrl.toHttpUrlOrNull() ?: return relativeOrAbsolute
+            base.resolve(relativeOrAbsolute)?.toString() ?: relativeOrAbsolute
+        } catch (_: Exception) {
+            relativeOrAbsolute
+        }
     }
 }

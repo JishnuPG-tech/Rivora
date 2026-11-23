@@ -2,6 +2,8 @@ package com.rivora.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,11 +50,13 @@ fun NetworksTab(
   cellularUnitText: String = "MB/s",
   wifiSpeedMBps: Float = 0f,
   cellularSpeedMBps: Float = 0f,
-  cellularActive: Boolean,
+  wifiActive: Boolean = true,
+  cellularActive: Boolean = true,
   unitText: String,
   wifiStreams: Int,
   downloadedGB: Float,
-  onToggleCellular: () -> Unit,
+  onToggleWifi: () -> Unit = {},
+  onToggleCellular: () -> Unit = {},
   onOpenLimits: () -> Unit,
   modifier: Modifier = Modifier,
   wifiInterface: String = "wlan0",
@@ -60,11 +65,12 @@ fun NetworksTab(
   isCellularConnected: Boolean = true,
   isWifiConnected: Boolean = true
 ) {
-  val isCellActive = isCellularConnected && cellularActive
-  val isDual = isWifiConnected && isCellActive
+  val isWifiAct = isWifiConnected && wifiActive
+  val isCellAct = isCellularConnected && cellularActive
+  val isDual = isWifiAct && isCellAct
 
-  val wifiSpd = if (isWifiConnected) wifiSpeedMBps else 0f
-  val cellSpd = if (isCellActive) cellularSpeedMBps else 0f
+  val wifiSpd = if (isWifiAct) wifiSpeedMBps else 0f
+  val cellSpd = if (isCellAct) cellularSpeedMBps else 0f
   val totalSpd = wifiSpd + cellSpd
 
   val wifiRatio: Float
@@ -85,13 +91,13 @@ fun NetworksTab(
       wifiSharePercent = 50
       cellSharePercent = 50
     }
-    isCellActive -> {
+    isCellAct -> {
       wifiRatio = 0f
       cellRatio = 1f
       wifiSharePercent = 0
       cellSharePercent = 100
     }
-    isWifiConnected -> {
+    isWifiAct -> {
       wifiRatio = 1f
       cellRatio = 0f
       wifiSharePercent = 100
@@ -105,7 +111,8 @@ fun NetworksTab(
     }
   }
 
-  val activeCount = (if (isWifiConnected) 1 else 0) + (if (isCellActive) 1 else 0)
+  val activeCount = (if (isWifiAct) 1 else 0) + (if (isCellAct) 1 else 0)
+  val totalAvailable = (if (isWifiConnected) 1 else 0) + (if (isCellularConnected) 1 else 0)
 
   Column(
     modifier = modifier.fillMaxWidth(),
@@ -122,43 +129,44 @@ fun NetworksTab(
           text = "Connections",
           style = RivoraType.headingCard.copy(color = RivoraColor.TextPrimary)
         )
-        val activeCount = (if (isWifiConnected) 1 else 0) + (if (isCellActive) 1 else 0)
-        val totalAvailable = (if (isWifiConnected) 1 else 0) + (if (isCellularConnected) 1 else 0)
         Text(
           text = if (totalAvailable > 1) "$activeCount OF $totalAvailable ACTIVE" else "$activeCount ACTIVE",
           style = RivoraType.Eyebrow.copy(color = RivoraColor.TextSecondary)
         )
       }
 
-      // Connection Row 1: Wi-Fi (Only displayed if Wi-Fi is connected)
+      // Connection Row 1: Wi-Fi (Displayed if Wi-Fi is connected)
       if (isWifiConnected) {
         ConnectionRowItem(
-          dotColor = RivoraColor.Orange,
+          dotColor = if (isWifiAct) RivoraColor.Orange else RivoraColor.TextDisabled,
           title = "Wi-Fi",
-          subtitle = "$wifiInterface · ${if (wifiStreams > 0) "$wifiStreams streams" else "active"}",
-          valueText = wifiSpeedText,
-          unitText = wifiUnitText,
-          isChecked = true,
-          onToggle = {},
-          enabled = true,
+          subtitle = when {
+            isWifiAct -> "$wifiInterface · ${if (wifiStreams > 0) "$wifiStreams streams" else "active"}"
+            else -> "$wifiInterface · disabled"
+          },
+          valueText = if (isWifiAct) wifiSpeedText else "0.0",
+          unitText = if (isWifiAct) wifiUnitText else "",
+          isChecked = isWifiAct,
+          onToggle = onToggleWifi,
+          enabled = isWifiConnected,
           switchActiveColor = RivoraColor.Orange
         )
       }
 
-      // Connection Row 2: Cellular (Only displayed if Cellular is connected)
+      // Connection Row 2: Cellular (Displayed if Cellular is connected)
       if (isCellularConnected) {
         ConnectionRowItem(
-          dotColor = if (cellularActive) RivoraColor.StreamSecondary else RivoraColor.TextDisabled,
+          dotColor = if (isCellAct) RivoraColor.StreamSecondary else RivoraColor.TextDisabled,
           title = "Cellular",
           subtitle = when {
-            cellularActive -> "$cellularInterface · ${if (cellularStreams > 0) "$cellularStreams streams" else "active"}"
+            isCellAct -> "$cellularInterface · ${if (cellularStreams > 0) "$cellularStreams streams" else "active"}"
             else -> "$cellularInterface · disabled"
           },
-          valueText = if (cellularActive) cellularSpeedText else "0.0",
-          unitText = if (cellularActive) cellularUnitText else "",
-          isChecked = cellularActive,
+          valueText = if (isCellAct) cellularSpeedText else "0.0",
+          unitText = if (isCellAct) cellularUnitText else "",
+          isChecked = isCellAct,
           onToggle = onToggleCellular,
-          enabled = true,
+          enabled = isCellularConnected,
           switchActiveColor = RivoraColor.StreamSecondary
         )
       }
@@ -181,8 +189,8 @@ fun NetworksTab(
         Text(
           text = when {
             isDual -> "Combined speed"
-            cellularActive && isCellularConnected -> "Cellular speed"
-            isWifiConnected -> "Wi-Fi speed"
+            isCellAct -> "Cellular speed"
+            isWifiAct -> "Wi-Fi speed"
             else -> "Standby"
           },
           style = RivoraType.headingCard.copy(color = RivoraColor.TextPrimary)
@@ -210,12 +218,12 @@ fun NetworksTab(
           secondaryProgress = cellRatio,
           height = 6.dp
         )
-        cellularActive && isCellularConnected -> LargeProgressBar(
+        isCellAct -> LargeProgressBar(
           progress = 0f,
           secondaryProgress = 1f,
           height = 6.dp
         )
-        isWifiConnected -> LargeProgressBar(
+        isWifiAct -> LargeProgressBar(
           progress = 1f,
           secondaryProgress = 0f,
           height = 6.dp
@@ -242,10 +250,10 @@ fun NetworksTab(
                 .width(8.dp)
                 .height(8.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(RivoraColor.Orange)
+                .background(if (isWifiAct) RivoraColor.Orange else RivoraColor.TextDisabled)
             )
             Text(
-              text = "WI-FI $wifiSharePercent%",
+              text = if (isWifiAct) "WI-FI $wifiSharePercent%" else "WI-FI (OFF)",
               style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Medium, 0.4f, 14f).copy(color = RivoraColor.TextSecondary)
             )
           }
@@ -261,10 +269,10 @@ fun NetworksTab(
                 .width(8.dp)
                 .height(8.dp)
                 .clip(RoundedCornerShape(2.dp))
-                .background(if (cellularActive) RivoraColor.StreamSecondary else RivoraColor.TextDisabled)
+                .background(if (isCellAct) RivoraColor.StreamSecondary else RivoraColor.TextDisabled)
             )
             Text(
-              text = if (cellularActive) "CELLULAR $cellSharePercent%" else "CELLULAR (OFF)",
+              text = if (isCellAct) "CELLULAR $cellSharePercent%" else "CELLULAR (OFF)",
               style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Medium, 0.4f, 14f).copy(color = RivoraColor.TextSecondary)
             )
           }
@@ -295,7 +303,14 @@ private fun ConnectionRowItem(
   enabled: Boolean = true,
   switchActiveColor: Color = RivoraColor.Orange
 ) {
-  RivoraInsetBox(padding = 14.dp) {
+  RivoraInsetBox(
+    padding = 14.dp,
+    modifier = if (enabled) Modifier.clickable(
+      interactionSource = remember { MutableInteractionSource() },
+      indication = null,
+      onClick = onToggle
+    ) else Modifier
+  ) {
     Row(
       modifier = Modifier.fillMaxWidth(),
       horizontalArrangement = Arrangement.SpaceBetween,
@@ -311,7 +326,7 @@ private fun ConnectionRowItem(
           Text(
             text = title,
             style = RivoraType.rivoraText(RivoraType.Sans, 15f, FontWeight.SemiBold, 0f, 19f).copy(
-              color = if (enabled) RivoraColor.TextPrimary else RivoraColor.TextDisabled
+              color = if (enabled && isChecked) RivoraColor.TextPrimary else RivoraColor.TextDisabled
             ),
             maxLines = 1,
             softWrap = false
@@ -319,7 +334,7 @@ private fun ConnectionRowItem(
           Text(
             text = subtitle,
             style = RivoraType.rivoraText(RivoraType.Mono, 11f, FontWeight.Normal, 0f, 14f).copy(
-              color = if (enabled) RivoraColor.TextMuted else RivoraColor.TextDisabled
+              color = if (enabled && isChecked) RivoraColor.TextMuted else RivoraColor.TextDisabled
             ),
             maxLines = 1,
             softWrap = false

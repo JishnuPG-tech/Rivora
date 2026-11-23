@@ -66,6 +66,7 @@ fun OverviewTab(
   cellularSpeedText: String,
   wifiSpeedMBps: Float = 0f,
   cellularSpeedMBps: Float = 0f,
+  wifiActive: Boolean = true,
   cellularActive: Boolean,
   completedChunks: Int,
   totalChunks: Int,
@@ -90,9 +91,10 @@ fun OverviewTab(
   val progressPercent = if (isCompleted) 100 else (progress * 100).toInt()
 
   val isCellActive = isCellularConnected && cellularActive
-  val isDual = isWifiConnected && isCellActive
+  val isWifiAct = isWifiConnected && wifiActive
+  val isDual = isWifiAct && isCellActive
 
-  val wifiSpd = if (isWifiConnected) wifiSpeedMBps else 0f
+  val wifiSpd = if (isWifiAct) wifiSpeedMBps else 0f
   val cellSpd = if (isCellActive) cellularSpeedMBps else 0f
   val totalSpd = wifiSpd + cellSpd
 
@@ -120,7 +122,7 @@ fun OverviewTab(
       wifiSharePercent = 0
       cellSharePercent = 100
     }
-    isWifiConnected -> {
+    isWifiAct -> {
       targetWifiRatio = 1f
       targetCellRatio = 0f
       wifiSharePercent = 100
@@ -452,12 +454,12 @@ fun OverviewTab(
               verticalAlignment = Alignment.CenterVertically,
               horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              NetworkDot(color = RivoraColor.Orange)
-              RivoraCheckbox(checked = true, onCheckedChange = {})
+              NetworkDot(color = if (isWifiAct) RivoraColor.Orange else RivoraColor.TextDisabled)
+              RivoraCheckbox(checked = isWifiAct, onCheckedChange = {})
               Text(
                 text = "Wi-Fi",
                 style = RivoraType.rivoraText(RivoraType.Sans, 14.5f, FontWeight.SemiBold, 0f, 18f).copy(
-                  color = RivoraColor.TextPrimary
+                  color = if (isWifiAct) RivoraColor.TextPrimary else RivoraColor.TextMuted
                 ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -471,15 +473,15 @@ fun OverviewTab(
               horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
               Text(
-                text = wifiSpeedText,
+                text = if (isWifiAct) wifiSpeedText else "0.0 $unitText",
                 style = RivoraType.rivoraText(RivoraType.Mono, 13f, FontWeight.Bold, 0f, 16f).copy(
-                  color = RivoraColor.Orange
+                  color = if (isWifiAct) RivoraColor.Orange else RivoraColor.TextMuted
                 ),
                 maxLines = 1,
                 softWrap = false
               )
               Text(
-                text = "· $wifiSharePercent%",
+                text = if (isWifiAct) "· $wifiSharePercent%" else "· (disabled)",
                 style = RivoraType.rivoraText(RivoraType.Mono, 12f, FontWeight.SemiBold, 0f, 15f).copy(
                   color = RivoraColor.TextSecondary
                 ),

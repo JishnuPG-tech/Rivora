@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -106,10 +107,47 @@ class DownloadEngine private constructor(
     private val chunkList = java.util.concurrent.CopyOnWriteArrayList<ChunkProgress>()
     private val isPaused = AtomicBoolean(false)
     private val isCancelled = AtomicBoolean(false)
+    private val isWifiEnabled = AtomicBoolean(true)
     private val isCellularEnabled = AtomicBoolean(true)
+    private val networkConfigTrigger = MutableStateFlow(0L)
+
+    fun setWifiActive(active: Boolean) {
+        val changed = isWifiEnabled.getAndSet(active) != active
+        if (changed) {
+            networkConfigTrigger.value = System.currentTimeMillis()
+            updateStreamCountsFromNetworkStates()
+        }
+    }
 
     fun setCellularActive(active: Boolean) {
-        isCellularEnabled.set(active)
+        val changed = isCellularEnabled.getAndSet(active) != active
+        if (changed) {
+            networkConfigTrigger.value = System.currentTimeMillis()
+            updateStreamCountsFromNetworkStates()
+        }
+    }
+
+    fun isWifiActive(): Boolean = isWifiEnabled.get()
+    fun isCellularActive(): Boolean = isCellularEnabled.get()
+
+    private fun updateStreamCountsFromNetworkStates() {
+        val states = networkManager.networkStates.value
+        val wifiConnected = states[NetworkAdapterType.WIFI]?.isConnected == true && isWifiEnabled.get()
+        val cellConnected = states[NetworkAdapterType.CELLULAR]?.isConnected == true && isCellularEnabled.get()
+
+        val (targetWifiStreams, targetCellStreams) = when {
+            wifiConnected && cellConnected -> 4 to 4
+            wifiConnected -> 6 to 0
+            cellConnected -> 0 to 6
+            else -> 0 to 0
+        }
+
+        _engineState.update {
+            it.copy(
+                wifiStreams = targetWifiStreams,
+                cellularStreams = targetCellStreams
+            )
+        }
     }
 
     // Byte counters for real speed calculation
@@ -190,6 +228,7 @@ class DownloadEngine private constructor(
                 var finalTotalBytes = totalBytes
                 var finalFileName = suggestedFileName
                 var finalResumable = isResumable
+                var finalUrl = url
 
                 if (finalTotalBytes <= 0L || finalFileName == null) {
                     val probe = UrlProber.probe(url)
@@ -198,6 +237,7 @@ class DownloadEngine private constructor(
                         return@launch
                     }
                     if (probe.isSuccess) {
+                        finalUrl = probe.url
                         finalTotalBytes = probe.totalBytes
                         finalFileName = probe.fileName
                         finalResumable = probe.isResumable
@@ -209,7 +249,7 @@ class DownloadEngine private constructor(
 
                 // Check if this item is ALREADY active or queued to prevent duplicates!
                 val existingActive = _engineState.value.activeItem
-                if (existingActive != null && (existingActive.downloadUrl == url || existingActive.fileName == finalFileName)) {
+                if (existingActive != null && (existingActive.downloadUrl == url || existingActive.downloadUrl == finalUrl || existingActive.fileName == finalFileName)) {
                     Log.d(TAG, "Item already active, resuming: ${existingActive.fileName}")
                     if (isPaused.get()) {
                         resumeDownload()
@@ -217,7 +257,7 @@ class DownloadEngine private constructor(
                     return@launch
                 }
 
-                val existingQueued = _engineState.value.queue.firstOrNull { it.downloadUrl == url || it.fileName == finalFileName }
+                val existingQueued = _engineState.value.queue.firstOrNull { it.downloadUrl == url || it.downloadUrl == finalUrl || it.fileName == finalFileName }
                 if (existingQueued != null) {
                     Log.d(TAG, "Item already in queue: ${existingQueued.fileName}")
                     return@launch
@@ -245,10 +285,10 @@ class DownloadEngine private constructor(
                     totalBytes = finalTotalBytes,
                     downloadedBytes = 0L,
                     status = DownloadStatus.QUEUED,
-                    host = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" },
+                    host = try { java.net.URI(finalUrl).host ?: "" } catch (_: Exception) { "" },
                     destinationPath = displayPath,
                     destinationUri = customTreeUri?.toString(),
-                    downloadUrl = url
+                    downloadUrl = finalUrl
                 )
 
                 val currentState = _engineState.value
@@ -622,7 +662,11 @@ class DownloadEngine private constructor(
                             if (!isActive || isCancelled.get() || isPaused.get()) break
 
                             if (!isCellularEnabled.get() && type == NetworkAdapterType.CELLULAR) {
-                                delay(500)
+                                delay(300)
+                                continue
+                            }
+                            if (!isWifiEnabled.get() && type == NetworkAdapterType.WIFI) {
+                                delay(300)
                                 continue
                             }
 
@@ -671,44 +715,48 @@ class DownloadEngine private constructor(
             }
         }
 
-        // Active Monitor: Continuously adapt streams as networks connect/disconnect
+        // Active Monitor: Continuously adapt streams as networks connect/disconnect or user toggles adapters
         val monitorJob = scope.launch {
-            networkManager.networkStates.collect { states ->
-                val wifiConnected = states[NetworkAdapterType.WIFI]?.isConnected == true
-                val cellConnected = states[NetworkAdapterType.CELLULAR]?.isConnected == true && isCellularEnabled.get()
+            combine(networkManager.networkStates, networkConfigTrigger) { states, _ -> states }
+                .collect { states ->
+                    val wifiPhysicallyConnected = states[NetworkAdapterType.WIFI]?.isConnected == true
+                    val cellPhysicallyConnected = states[NetworkAdapterType.CELLULAR]?.isConnected == true
 
-                val (targetWifiStreams, targetCellStreams) = when {
-                    wifiConnected && cellConnected -> 4 to 4
-                    wifiConnected -> 6 to 0
-                    cellConnected -> 0 to 6
-                    else -> 0 to 0
-                }
+                    val wifiActive = wifiPhysicallyConnected && isWifiEnabled.get()
+                    val cellActive = cellPhysicallyConnected && isCellularEnabled.get()
 
-                _engineState.update {
-                    it.copy(
-                        wifiStreams = targetWifiStreams,
-                        cellularStreams = targetCellStreams
-                    )
-                }
+                    val (targetWifiStreams, targetCellStreams) = when {
+                        wifiActive && cellActive -> 4 to 4
+                        wifiActive -> 6 to 0
+                        cellActive -> 0 to 6
+                        else -> 0 to 0
+                    }
 
-                if (wifiConnected && targetWifiStreams > 0) {
-                    ensureWorkersForAdapter(NetworkAdapterType.WIFI, targetWifiStreams)
-                } else if (!wifiConnected) {
-                    cancelWorkersForAdapter(NetworkAdapterType.WIFI)
-                }
+                    _engineState.update {
+                        it.copy(
+                            wifiStreams = targetWifiStreams,
+                            cellularStreams = targetCellStreams
+                        )
+                    }
 
-                if (cellConnected && targetCellStreams > 0) {
-                    ensureWorkersForAdapter(NetworkAdapterType.CELLULAR, targetCellStreams)
-                } else if (!cellConnected) {
-                    cancelWorkersForAdapter(NetworkAdapterType.CELLULAR)
-                }
+                    if (wifiActive && targetWifiStreams > 0) {
+                        ensureWorkersForAdapter(NetworkAdapterType.WIFI, targetWifiStreams)
+                    } else {
+                        cancelWorkersForAdapter(NetworkAdapterType.WIFI)
+                    }
 
-                if (!wifiConnected && !cellConnected) {
-                    ensureWorkersForAdapter(NetworkAdapterType.UNKNOWN, 4)
-                } else {
-                    cancelWorkersForAdapter(NetworkAdapterType.UNKNOWN)
+                    if (cellActive && targetCellStreams > 0) {
+                        ensureWorkersForAdapter(NetworkAdapterType.CELLULAR, targetCellStreams)
+                    } else {
+                        cancelWorkersForAdapter(NetworkAdapterType.CELLULAR)
+                    }
+
+                    if (!wifiActive && !cellActive) {
+                        ensureWorkersForAdapter(NetworkAdapterType.UNKNOWN, 4)
+                    } else {
+                        cancelWorkersForAdapter(NetworkAdapterType.UNKNOWN)
+                    }
                 }
-            }
         }
 
         // Wait until all chunks are completed or paused or cancelled
@@ -833,6 +881,14 @@ class DownloadEngine private constructor(
                             call.cancel()
                             return false
                         }
+                        if (adapterType == NetworkAdapterType.CELLULAR && !isCellularEnabled.get()) {
+                            call.cancel()
+                            return false
+                        }
+                        if (adapterType == NetworkAdapterType.WIFI && !isWifiEnabled.get()) {
+                            call.cancel()
+                            return false
+                        }
 
                         val target = currentStorageTarget ?: return false
                         val writeOffset = chunk.startByte + chunk.downloadedBytes
@@ -874,6 +930,12 @@ class DownloadEngine private constructor(
             } catch (e: Exception) {
                 call.cancel()
                 if (e is CancellationException || isCancelled.get() || isPaused.get()) {
+                    return false
+                }
+                if (adapterType == NetworkAdapterType.CELLULAR && !isCellularEnabled.get()) {
+                    return false
+                }
+                if (adapterType == NetworkAdapterType.WIFI && !isWifiEnabled.get()) {
                     return false
                 }
                 Log.w(TAG, "Chunk ${chunk.index} attempt $retryCount failed on $adapterType: ${e.message}")
@@ -1177,13 +1239,15 @@ class DownloadEngine private constructor(
 
                     if (rawWifi == 0f && smoothedWifiSpeedMBps < 0.015f) smoothedWifiSpeedMBps = 0f
                     if (rawCell == 0f && smoothedCellSpeedMBps < 0.015f) smoothedCellSpeedMBps = 0f
+                    if (!isWifiEnabled.get()) smoothedWifiSpeedMBps = 0f
+                    if (!isCellularEnabled.get()) smoothedCellSpeedMBps = 0f
                 } else {
                     smoothedWifiSpeedMBps = 0f
                     smoothedCellSpeedMBps = 0f
                 }
 
-                val wifiSpeedMBps = smoothedWifiSpeedMBps
-                val cellSpeedMBps = smoothedCellSpeedMBps
+                val wifiSpeedMBps = if (isWifiEnabled.get()) smoothedWifiSpeedMBps else 0f
+                val cellSpeedMBps = if (isCellularEnabled.get()) smoothedCellSpeedMBps else 0f
                 val totalSpeedMBps = wifiSpeedMBps + cellSpeedMBps
 
                 _engineState.update { state ->

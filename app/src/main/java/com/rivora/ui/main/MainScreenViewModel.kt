@@ -17,6 +17,7 @@ data class RivoraUiState(
   val isPaused: Boolean = false,
   val isSlowMode: Boolean = false,
   val unit: String = "MB/s", // "MB/s" | "Mbps"
+  val isWifiActive: Boolean = true,
   val isCellularActive: Boolean = true,
   val activeModal: String? = null, // "newdl" | "networks" | "limits" | null
   val activeItem: DownloadItem? = null,
@@ -236,16 +237,33 @@ class MainScreenViewModel : ViewModel() {
     _uiState.update { it.copy(unit = unit) }
   }
 
+  fun toggleWifi() {
+    _uiState.update { current ->
+      // Disallow disabling Wi-Fi if Cellular is not currently connected & active (prevents 0 active networks)
+      val isCellUsable = current.isCellularConnected && current.isCellularActive
+      if (current.isWifiActive && !isCellUsable) {
+        return@update current
+      }
+      val newActive = !current.isWifiActive
+      try {
+        com.rivora.backend.DownloadEngine.getInstance().setWifiActive(newActive)
+      } catch (e: Exception) {
+        // Ignored in test/preview
+      }
+      current.copy(isWifiActive = newActive)
+    }
+  }
+
   fun toggleCellular() {
     _uiState.update { current ->
+      // Disallow disabling Cellular if Wi-Fi is not currently connected & active (prevents 0 active networks)
+      val isWifiUsable = current.isWifiConnected && current.isWifiActive
+      if (current.isCellularActive && !isWifiUsable) {
+        return@update current
+      }
       val newActive = !current.isCellularActive
       try {
         com.rivora.backend.DownloadEngine.getInstance().setCellularActive(newActive)
-        if (newActive) {
-          com.rivora.backend.MultiNetworkManager.getInstance().requestCellularConcurrency()
-        } else {
-          com.rivora.backend.MultiNetworkManager.getInstance().releaseCellularConcurrency()
-        }
       } catch (e: Exception) {
         // Ignored in test/preview
       }

@@ -63,7 +63,8 @@ data class DetectedFileInfo(
   val ext: String,
   val tag: String,
   val totalBytes: Long = 0L,
-  val isResumable: Boolean = true
+  val isResumable: Boolean = true,
+  val resolvedUrl: String = ""
 )
 
 @Composable
@@ -172,7 +173,8 @@ fun AddDownloadScreen(
           ext = probe.fileExtension,
           tag = if (probe.isResumable) "resumable · multi-stream" else "single-stream",
           totalBytes = probe.totalBytes,
-          isResumable = probe.isResumable
+          isResumable = probe.isResumable,
+          resolvedUrl = probe.url
         )
       }
     } else {
@@ -660,7 +662,8 @@ fun AddDownloadScreen(
                 .border(1.dp, if (isDownloadReady) Color(0xFFE5A044) else Color(0x22FFFFFF), RoundedCornerShape(8.dp))
                 .clickable(enabled = isDownloadReady) {
                   val file = detectedFile ?: return@clickable
-                  onStartDownload(urlInput.trim(), file.name, file.totalBytes, file.isResumable, selectedFolderUri, savePath)
+                  val startUrl = file.resolvedUrl.ifBlank { urlInput.trim() }
+                  onStartDownload(startUrl, file.name, file.totalBytes, file.isResumable, selectedFolderUri, savePath)
                 }
                 .padding(horizontal = 18.dp),
               contentAlignment = Alignment.Center

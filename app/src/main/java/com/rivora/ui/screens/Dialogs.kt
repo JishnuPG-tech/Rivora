@@ -135,7 +135,8 @@ fun NewDownloadDialog(
           ext = probe.fileExtension,
           tag = if (probe.isResumable) "resumable · multi-stream" else "single-stream",
           totalBytes = probe.totalBytes,
-          isResumable = probe.isResumable
+          isResumable = probe.isResumable,
+          resolvedUrl = probe.url
         )
       }
     } else {
@@ -482,7 +483,8 @@ fun NewDownloadDialog(
             text = if (isChecking) "Checking..." else "Add Download",
             onClick = {
               val file = detectedFile ?: return@RivoraButton
-              onStartDownload(urlInput.trim(), file.name, file.totalBytes, file.isResumable, selectedFolderUri, savePath)
+              val startUrl = file.resolvedUrl.ifBlank { urlInput.trim() }
+              onStartDownload(startUrl, file.name, file.totalBytes, file.isResumable, selectedFolderUri, savePath)
             },
             variant = if (isDownloadReady) RivoraButtonVariant.AMBER else RivoraButtonVariant.DARK,
             height = 38.dp
@@ -498,6 +500,7 @@ fun NewDownloadDialog(
  */
 @Composable
 fun NetworksDialog(
+  wifiActive: Boolean = true,
   cellularActive: Boolean,
   onDismiss: () -> Unit,
   onOpenLimits: () -> Unit,

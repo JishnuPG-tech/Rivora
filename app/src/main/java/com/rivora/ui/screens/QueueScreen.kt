@@ -82,13 +82,14 @@ fun QueueScreen(
   onRemoveQueued: (String) -> Unit = {},
   onOpenFile: (DownloadItem) -> Unit = {},
   onDeleteFinished: (DownloadItem) -> Unit = {},
+  wifiActive: Boolean = true,
   isWifiConnected: Boolean = false,
   isCellularConnected: Boolean = true
 ) {
   var showCancelConfirm by remember { mutableStateOf(false) }
   val activeCount = if (activeItem != null && (activeItem.status == DownloadStatus.ACTIVE || activeItem.status == DownloadStatus.PAUSED)) 1 else 0
   val queueCount = queue.size
-  val activeNetworks = (if (isWifiConnected) 1 else 0) + (if (cellularActive && isCellularConnected) 1 else 0)
+  val activeNetworks = (if (wifiActive && isWifiConnected) 1 else 0) + (if (cellularActive && isCellularConnected) 1 else 0)
 
   Box(
     modifier = modifier
